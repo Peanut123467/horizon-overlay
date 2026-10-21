@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "horizon-overlay"
 version = "0.1.0"
-description = "A click-through Windows overlay that softens the edges of a 3D game. No injection, no game files, no telemetry."
+description = "A click-through Windows overlay for players who get motion discomfort in 3D games. No injection, no game files, no telemetry."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
