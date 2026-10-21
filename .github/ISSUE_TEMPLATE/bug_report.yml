@@ -1,0 +1,80 @@
+name: 问题反馈
+description: 程序崩溃、显示异常、热键失灵、托盘问题等
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先确认两件事，能省掉一半来回：
+
+        1. 游戏是否运行在**无边框窗口**模式？独占全屏下叠加层不显示，这是 Windows 的合成器行为，不是 bug。
+        2. 关掉再启动一次，问题还在吗？
+
+  - type: input
+    id: version
+    attributes:
+      label: Horizon 版本
+      description: 托盘右键菜单底部可以看到版本号
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows 11
+        - Windows 10
+        - 其他（请在描述里说明）
+    validations:
+      required: true
+
+  - type: input
+    id: display
+    attributes:
+      label: 显示器分辨率与刷新率
+      placeholder: 2560x1440 @ 165Hz，单屏
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述
+      description: 你期望发生什么，实际发生了什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 启动 Horizon
+        2. 打开某游戏（无边框窗口）
+        3. 按 Ctrl+Alt+2
+        4. 出现……
+    validations:
+      required: false
+
+  - type: textarea
+    id: log
+    attributes:
+      label: 日志
+      description: |
+        把 `%APPDATA%\horizon\horizon.log` 的内容贴在这里。
+        在文件资源管理器地址栏输入这个路径就能打开。
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我已阅读 README 的「已知限制」，确认这不是独占全屏导致的
+          required: true
+        - label: 我理解本项目不做效果承诺，这里反馈的是程序行为问题而不是疗效问题
+          required: true

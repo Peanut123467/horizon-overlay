@@ -1,0 +1,56 @@
+name: 游戏适配反馈
+description: 某款游戏里叠加层不显示、显示异常，或者观感不对
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这类反馈对项目最有价值——它决定了「无边框窗口下能否正常工作」这个前提到底成不成立。
+
+  - type: input
+    id: game
+    attributes:
+      label: 游戏名称
+      placeholder: 例如：赛博朋克 2077
+    validations:
+      required: true
+
+  - type: dropdown
+    id: display-mode
+    attributes:
+      label: 游戏的显示模式
+      options:
+        - 无边框窗口（Borderless）
+        - 窗口模式
+        - 独占全屏（Exclusive Fullscreen）
+        - 不确定
+    validations:
+      required: true
+
+  - type: dropdown
+    id: overlay
+    attributes:
+      label: 叠加层是否显示出来了
+      options:
+        - 正常显示
+        - 完全看不到
+        - 偶尔出现、会被游戏盖住
+        - 显示了但位置/大小不对
+    validations:
+      required: true
+
+  - type: textarea
+    id: detail
+    attributes:
+      label: 具体情况
+      description: 用了哪个预设、什么分辨率、有没有开 HDR、是否装了其他叠加层（Steam / Discord / ReShade）
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私
+      options:
+        - label: 我确认没有在本条反馈里附带任何个人健康信息
+          required: true
