@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,8 @@ __all__ = [
     "save",
     "config_path",
     "next_color",
+    "apply_patch",
+    "STATS_POSITIONS",
     "PRESETS",
     "COLOR_PALETTE",
 ]
@@ -199,3 +202,109 @@ def save(cfg: HorizonConfig, path: Path | None = None) -> Path:
     tmp.write_text(json.dumps(cfg.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
     return p
+
+
+# ----------------------------------------------------------------- patching --
+
+# Rendered values must stay inside ranges the compositor can actually handle.
+# Out-of-range input is clamped rather than rejected: a slightly wrong slider
+# must never be able to produce a config that crashes the renderer.
+_LIMITS: dict[tuple[str, str], tuple[float, float]] = {
+    ("vignette", "inner"): (0.0, 2.0),
+    ("vignette", "outer"): (0.0, 3.0),
+    ("vignette", "strength"): (0.0, 1.0),
+    ("frame", "inset"): (0, 400),
+    ("frame", "width"): (1, 60),
+    ("frame", "alpha"): (0, 255),
+    ("reticle", "size"): (1, 80),
+    ("reticle", "gap"): (0, 80),
+    ("reticle", "alpha"): (0, 255),
+    ("grid", "spacing"): (24, 2000),
+    ("grid", "radius"): (1, 20),
+    ("grid", "alpha"): (0, 255),
+    ("session", "minutes"): (1, 600),
+    ("session", "reminder_seconds"): (3, 120),
+    ("stats", "font_size"): (9, 48),
+    ("stats", "alpha"): (0, 255),
+    ("stats", "refresh_ms"): (250, 10000),
+}
+
+STATS_POSITIONS: tuple[str, ...] = ("top-left", "top-right", "bottom-left", "bottom-right")
+
+_HEX_RE = re.compile(r"^#?[0-9a-fA-F]{3}$|^#?[0-9a-fA-F]{6}$")
+
+
+def _coerce(section: str, name: str, value: Any, default: Any) -> Any:
+    """Force ``value`` to the type of ``default``, then clamp it."""
+    if isinstance(default, bool):
+        return bool(value)
+    if isinstance(default, int):
+        try:
+            out: float = int(round(float(value)))
+        except (TypeError, ValueError):
+            return default
+    elif isinstance(default, float):
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            return default
+    else:
+        return value
+
+    limits = _LIMITS.get((section, name))
+    if limits:
+        low, high = limits
+        out = max(low, min(high, out))
+    return out
+
+
+def apply_patch(cfg: HorizonConfig, patch: dict[str, Any]) -> HorizonConfig:
+    """Return a new config with ``patch`` merged in, coerced and clamped.
+
+    The console sends partial dicts over IPC, so nothing in here may be
+    trusted: unknown keys are dropped, wrong types fall back to the current
+    value, numbers are clamped, and an invalid colour keeps the old one.
+    """
+    if not isinstance(patch, dict):
+        return cfg
+
+    merged = cfg.to_dict()
+    for key, value in patch.items():
+        if key not in merged:
+            continue
+        if isinstance(value, dict) and isinstance(merged[key], dict):
+            for sub_key, sub_value in value.items():
+                if sub_key in merged[key]:
+                    merged[key][sub_key] = sub_value
+        else:
+            merged[key] = value
+
+    new = HorizonConfig.from_dict(merged)
+
+    defaults = HorizonConfig()
+    for section in ("vignette", "frame", "reticle", "grid", "session", "stats"):
+        obj = getattr(new, section)
+        base = getattr(defaults, section)
+        for f in fields(obj):
+            setattr(
+                obj, f.name, _coerce(section, f.name, getattr(obj, f.name), getattr(base, f.name))
+            )
+
+    new.monitor = _coerce("", "monitor", new.monitor, 0)
+    new.start_hidden = bool(new.start_hidden)
+    new.tray_hint_shown = bool(new.tray_hint_shown)
+
+    colour = str(new.color or "").strip()
+    if _HEX_RE.match(colour):
+        if not colour.startswith("#"):
+            colour = "#" + colour
+        if len(colour) == 4:  # #RGB -> #RRGGBB
+            colour = "#" + "".join(ch * 2 for ch in colour[1:])
+        new.color = colour.upper()
+    else:
+        new.color = cfg.color
+
+    if new.stats.position not in STATS_POSITIONS:
+        new.stats.position = cfg.stats.position
+
+    return new

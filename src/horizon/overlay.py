@@ -22,7 +22,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import metrics, win32
-from .config import COLOR_PALETTE, HorizonConfig, next_color, preset, save
+from .config import COLOR_PALETTE, HorizonConfig, apply_patch, next_color, preset, save
 from .render import compose, compose_stats
 
 __all__ = ["HorizonApp"]
@@ -50,6 +50,7 @@ TIMER_SESSION = 2
 TIMER_AUTOQUIT = 3
 TIMER_STATS = 4
 TIMER_HINT = 5
+TIMER_APPLY = 6  # debounce for IPC patches
 
 HOTKEY_TOGGLE = 1
 HOTKEY_GENTLE = 2
@@ -289,6 +290,8 @@ class HorizonApp:
         if msg == win32.WM_APP + APP_RELOAD:
             self.reload_config()
             return 0
+        if msg == win32.WM_COPYDATA:
+            return self._on_copydata(lparam)
         if msg == win32.WM_APP + APP_SET:
             self._apply_setting(int(wparam), int(lparam))
             return 0
@@ -341,6 +344,11 @@ class HorizonApp:
             self._tick_session()
         elif timer_id == TIMER_STATS:
             self._refresh_hud()
+        elif timer_id == TIMER_APPLY:
+            win32.kill_timer(self.main.hwnd, TIMER_APPLY)
+            self._persist()
+            self.redraw(force=True)
+            self._sync_hud()
         elif timer_id == TIMER_HINT:
             if time.monotonic() >= self._hint_until:
                 self._hint_until = 0.0
@@ -476,6 +484,24 @@ class HorizonApp:
         return metrics.snapshot(self._draw_ms).render()
 
     # ----------------------------------------------------------------- state
+
+    def _on_copydata(self, lparam) -> int:
+        """Handle a JSON patch from the control panel.
+
+        Applying the patch to ``self.cfg`` is immediate, but the redraw is
+        coalesced on an 80 ms timer: dragging a slider fires dozens of patches
+        a second and a full-screen recompose costs ~140 ms at 1440p.
+        """
+        from .ipc import read_payload
+
+        payload = read_payload(lparam)
+        if payload is None:
+            return 0  # not ours -- let DefWindowProc handle it
+
+        patch = payload.get("patch", payload)
+        self.cfg = apply_patch(self.cfg, patch)
+        win32.set_timer(self.main.hwnd, TIMER_APPLY, 80)
+        return 1
 
     def _apply_setting(self, action: int, value: int) -> None:
         """Apply a change requested by the tray menu.
