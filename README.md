@@ -23,7 +23,7 @@
 | 常驻系统托盘，随时开关、随时退出          | 不读写任何游戏配置文件            |
 | 全局热键切换预设与颜色               | 不联网、不上传、不采集健康数据        |
 | 本地会话计时 + 轻量休息提示           | 不显示游戏 FPS（不注入就拿不到，见下文） |
-| 显示刷新率、本程序内存、系统内存（本地统计）    | 不修改游戏画面、不改变游戏逻辑        |
+| 显示刷新率、本程序内存、系统内存（本地统计）    | 不修改游戏自身的渲染、不改变游戏逻辑        |
 | 单显示器、多分辨率自适应              | —                      |
 
 ---
@@ -48,7 +48,8 @@
 
 首次启动需要 1–3 秒（单文件 exe 要先解压到临时目录），之后常驻内存约 70MB
 
-> **杀毒软件报毒怎么办**>   
+> **杀毒软件报毒怎么办**
+>   
 > PyInstaller 打包的 exe 被启发式引擎误报是常见现象，不是本项目的行为问题。可以把文件加入信任列表，或者改用下面的「方式 B」从源码运行——源码运行不会有任何报毒。
 
 ### 方式 B：从源码运行
@@ -99,7 +100,7 @@ horizon --self-test
 ### 第一次使用的四步
 
 1. **双击 `Horizon.exe`**（或命令行 `horizonw`）；
-2. 看右下角——有个绿色圆环图标，说明程序在跑；
+2. 看右下角——有个绿色小图标，说明程序在跑；
 3. **把游戏设为「无边框窗口」**，然后正常进游戏，叠加层会盖在游戏画面上；
 4. 觉得挡视线或太强，按 `Ctrl+Alt+1` 换轻微档，或按 `Ctrl+Alt+H` 临时关掉。
 
@@ -107,7 +108,7 @@ horizon --self-test
 
 **右键托盘图标 → 退出。**
 
-这是唯一正确的退出方式。直接关控制台窗口或用任务管理器结束进程也能关，但那样不会保存你刚用热键改过的设置。
+这是推荐方式。用任务管理器强制结束也能关掉，但 Windows 会留下一个残影图标，鼠标划过去才消失
 
 ### 图标被折叠进 `^` 里了？
 
@@ -192,11 +193,11 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
 
 ## 八、预设
 
-| 预设         | 暗角起点 / 强度                  | 适用                 |
-| ---------- | -------------------------- | ------------------ |
-| `gentle`   | inner 0.55 / strength 0.35 | 只想让边缘柔一点，几乎无感      |
-| `standard` | inner 0.34 / strength 0.55 | 默认值                |
-| `strong`   | inner 0.20 / strength 0.78 | 短时间使用；遮挡明显，不建议长期开着 |
+| 预设 | 暗角起点 / 强度 | 边框 | 适用 |
+| --- | --- | --- | --- |
+| `gentle` | inner 0.55 / strength 0.35 | 6px | 只想让边缘柔一点，几乎无感 |
+| `standard` | inner 0.34 / strength 0.55 | 8px | 默认值 |
+| `strong` | inner 0.20 / strength 0.78 | 10px | 短时间使用；遮挡明显，不建议长期开着 |
 
 三个预设都可直接改配置微调
 
@@ -233,8 +234,11 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
 | `stats.position`                               | `top-left` / `top-right` / `bottom-left` / `bottom-right`             |
 | `stats.refresh_ms`                             | 统计面板刷新间隔，默认 1000ms                                                    |
 | `monitor`                                      | 显示器索引，0 为主屏                                                           |
+| `vignette.enabled` / `frame.enabled` / `reticle.enabled` / `grid.enabled` / `stats.enabled` | 各模块总开关，关掉后完全不绘制该元素 |
+| `stats.font_size` | 统计面板字号，默认 14 |
+| `start_hidden` | 启动时不显示叠加层，只挂托盘 |
 
-改完配置后重启程序生效（热重载在路线图里）。
+改完配置后，右键托盘 → **重新载入配置** 即可生效，不用重启
 
 ---
 
@@ -291,9 +295,12 @@ horizon --preset strong --monitor 1       # 指定预设与显示器
 horizon --color "#00E5FF"                 # 临时换色
 horizon --no-stats                        # 关掉统计面板
 horizon --preview out.png --compare       # 生成「关 / 开」对比图，不弹窗
+horizon --preview out.png --size 1200x675 # 指定预览图尺寸（默认 1920x1080）
 horizon --self-test                       # 渲染管线自检（可用于 CI）
 horizon --print-config                    # 打印当前生效配置
 horizon --duration 5 --no-tray            # 5 秒后自动退出，冒烟测试用
+horizon --config my.json                  # 用指定的配置文件，不动默认配置
+horizon --version                         # 打印版本号
 ```
 
 ---
@@ -394,7 +401,7 @@ Apache-2.0，见 [LICENSE](LICENSE)
 
 **Horizon** is a small Windows-only overlay for players who get motion discomfort in 3D games. It draws a static, click-through vignette plus a fixed border and centre anchor on top of the screen, narrowing peripheral optic flow and giving the eye a reference that does not move with the camera. It lives in the system tray — right-click the icon to quit, left-click to toggle.
 
-## Install
+### Install
 
 **Option A — prebuilt exe (no Python needed):** download `Horizon.exe` from Releases, put it anywhere, double-click it. First launch takes 1–3 s while the one-file bundle unpacks. Windows Defender / antivirus heuristics sometimes flag PyInstaller bootloaders; that is a known false positive, not behaviour of this project.
 
@@ -411,7 +418,7 @@ horizonw
 
 `horizonw` runs without a console window (tray only); `horizon` keeps a console so you can watch the log. Verify with `horizon --self-test`.
 
-## Use
+### Use
 
 1. Launch it — a green ring icon appears in the notification area and the vignette/border shows on screen.
 2. Set the game to **borderless windowed** (exclusive fullscreen will not show overlays).
