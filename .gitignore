@@ -4,6 +4,8 @@ __pycache__/
 build/
 dist/
 .venv/
+.venv-cache/
+.runtime/
 venv/
 .pytest_cache/
 .ruff_cache/

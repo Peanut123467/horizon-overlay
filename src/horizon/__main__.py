@@ -67,6 +67,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the accent colour for this run (default #00FF66)",
     )
     p.add_argument("--no-stats", action="store_true", help="disable the stats HUD")
+    p.add_argument("--console", action="store_true", help="open the graphical control panel")
+    p.add_argument("--overlay", action="store_true", help="run only the background overlay")
     p.add_argument(
         "--duration",
         type=float,
@@ -210,18 +212,37 @@ def main(argv: list[str] | None = None) -> int:
         print("horizon only runs on Windows (layered window + per-pixel alpha).", file=sys.stderr)
         return 2
 
+    overlay_requested = (
+        args.overlay
+        or args.duration is not None
+        or args.no_tray
+        or args.preset
+        or args.monitor is not None
+        or args.color
+        or args.no_stats
+    )
+    if args.console or not overlay_requested:
+        from .console import run_console
+
+        return run_console(cfg_path=path)
+
     log = _make_logger()
 
-    # persist the resolved config so hotkey changes have somewhere to land
-    try:
-        save(cfg, path)
-    except OSError as exc:
-        log(f"[horizon] warning: could not write config ({exc!r}); changes will not persist")
-
+    from .launcher import single_instance
     from .overlay import HorizonApp
 
     try:
-        HorizonApp(cfg, path, log=log).run(duration=args.duration, with_tray=not args.no_tray)
+        with single_instance("overlay") as unique:
+            if unique:
+                try:
+                    save(cfg, path)
+                except OSError as exc:
+                    log(
+                        f"[horizon] warning: could not write config ({exc!r}); changes will not persist"
+                    )
+                HorizonApp(cfg, path, log=log).run(
+                    duration=args.duration, with_tray=not args.no_tray
+                )
     except Exception:
         import traceback
 

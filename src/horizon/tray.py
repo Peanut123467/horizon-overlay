@@ -112,6 +112,11 @@ def start_tray(app, log: Callable[[str], None] = print):
     def on_toggle(_icon, _item):
         _post(APP_TOGGLE)
 
+    def on_console(_icon, _item):
+        from .launcher import launch
+
+        launch("--console", "--config", str(app.cfg_path))
+
     def on_reload(_icon, _item):
         _post(APP_RELOAD)
 
@@ -211,6 +216,7 @@ def start_tray(app, log: Callable[[str], None] = print):
     )
 
     menu = pystray.Menu(
+        pystray.MenuItem("打开控制面板", on_console),
         pystray.MenuItem("显示 / 隐藏叠加层", on_toggle, default=True),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("颜色", color_menu),

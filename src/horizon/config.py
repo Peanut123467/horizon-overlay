@@ -6,11 +6,14 @@ Everything lives in ``%APPDATA%/horizon/config.json``. No network, no telemetry.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
+
+from .hotkeys import DEFAULT_HOTKEYS, validate_bindings
 
 __all__ = [
     "Vignette",
@@ -43,8 +46,8 @@ class Vignette:
     """Radial darkening. The main lever against peripheral optic flow."""
 
     enabled: bool = True
-    inner: float = 0.34  # 0..1, where the darkening starts
-    outer: float = 1.06  # 0..1.2, where it reaches full strength
+    inner: float = 0.34  # where the darkening starts
+    outer: float = 1.06  # where it reaches full strength
     strength: float = 0.55  # 0..1, max alpha
 
 
@@ -83,8 +86,8 @@ class Session:
     """Local-only session timer with a gentle on-screen reminder."""
 
     enabled: bool = True
-    minutes: int = 40
-    reminder_seconds: int = 15
+    minutes: int = 60
+    reminder_seconds: int = 3
 
 
 @dataclass
@@ -93,7 +96,7 @@ class Stats:
 
     enabled: bool = True
     position: str = "top-left"  # top-left | top-right | bottom-left | bottom-right
-    font_size: int = 14
+    font_size: int = 21
     alpha: int = 200
     refresh_ms: int = 1000
 
@@ -110,6 +113,7 @@ class HorizonConfig:
     monitor: int = 0
     start_hidden: bool = False
     tray_hint_shown: bool = False  # one-time "where did the icon go" notification
+    hotkeys: dict[str, str] = field(default_factory=lambda: DEFAULT_HOTKEYS.copy())
 
     # -- (de)serialisation -------------------------------------------------
 
@@ -125,6 +129,8 @@ class HorizonConfig:
             value = raw[f.name]
             current = getattr(cfg, f.name)
             if hasattr(current, "__dataclass_fields__"):
+                if not isinstance(value, dict):
+                    continue
                 sub = type(current)
                 known = {sf.name for sf in fields(sub)}
                 setattr(cfg, f.name, sub(**{k: v for k, v in value.items() if k in known}))
@@ -141,7 +147,12 @@ PRESETS: dict[str, dict[str, Any]] = {
         "reticle": {"enabled": False, "size": 9, "gap": 9, "alpha": 150},
         "grid": {"enabled": False, "spacing": 180, "radius": 2, "alpha": 16},
     },
-    "standard": {},
+    "standard": {
+        "vignette": {"enabled": True, "inner": 0.34, "outer": 1.06, "strength": 0.55},
+        "frame": {"enabled": True, "inset": 26, "width": 8, "alpha": 90},
+        "reticle": {"enabled": True, "size": 9, "gap": 9, "alpha": 150},
+        "grid": {"enabled": False, "spacing": 180, "radius": 2, "alpha": 16},
+    },
     # Stronger mask, for short sessions only -- deliberately not the default.
     "strong": {
         "vignette": {"enabled": True, "inner": 0.20, "outer": 0.95, "strength": 0.78},
@@ -177,8 +188,9 @@ def preset(name: str, base: HorizonConfig | None = None) -> HorizonConfig:
     overlay = PRESETS.get(name)
     if overlay is None:
         raise KeyError(f"unknown preset: {name!r} (known: {', '.join(PRESETS)})")
-    for section, values in overlay.items():
-        data[section].update(values)
+    defaults = default_config().to_dict()
+    for section in ("vignette", "frame", "reticle", "grid"):
+        data[section] = {**defaults[section], **overlay.get(section, {})}
     return HorizonConfig.from_dict(data)
 
 
@@ -192,7 +204,7 @@ def load(path: Path | None = None) -> HorizonConfig:
         return default_config()
     if not isinstance(raw, dict):
         return default_config()
-    return HorizonConfig.from_dict(raw)
+    return apply_patch(default_config(), raw)
 
 
 def save(cfg: HorizonConfig, path: Path | None = None) -> Path:
@@ -241,16 +253,18 @@ def _coerce(section: str, name: str, value: Any, default: Any) -> Any:
     if isinstance(default, int):
         try:
             out: float = int(round(float(value)))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return default
     elif isinstance(default, float):
         try:
             out = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return default
     else:
         return value
 
+    if not math.isfinite(out):
+        return default
     limits = _LIMITS.get((section, name))
     if limits:
         low, high = limits
@@ -276,21 +290,24 @@ def apply_patch(cfg: HorizonConfig, patch: dict[str, Any]) -> HorizonConfig:
             for sub_key, sub_value in value.items():
                 if sub_key in merged[key]:
                     merged[key][sub_key] = sub_value
-        else:
+        elif not isinstance(merged[key], dict):
             merged[key] = value
 
     new = HorizonConfig.from_dict(merged)
+    try:
+        new.hotkeys = validate_bindings(merged["hotkeys"])
+    except ValueError:
+        new.hotkeys = cfg.hotkeys.copy()
 
-    defaults = HorizonConfig()
     for section in ("vignette", "frame", "reticle", "grid", "session", "stats"):
         obj = getattr(new, section)
-        base = getattr(defaults, section)
+        base = getattr(cfg, section)
         for f in fields(obj):
             setattr(
                 obj, f.name, _coerce(section, f.name, getattr(obj, f.name), getattr(base, f.name))
             )
 
-    new.monitor = _coerce("", "monitor", new.monitor, 0)
+    new.monitor = max(0, _coerce("", "monitor", new.monitor, cfg.monitor))
     new.start_hidden = bool(new.start_hidden)
     new.tray_hint_shown = bool(new.tray_hint_shown)
 

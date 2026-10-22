@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Horizon 控制台</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <h1>Horizon 控制台</h1>
+      </div>
+      <div class="topbar-right">
+        <span id="status" class="badge badge-wait">连接中…</span>
+        <button id="btn-start" class="btn btn-ghost" hidden>启动叠加层</button>
+        <button id="btn-toggle" class="btn btn-ghost" hidden>显示 / 隐藏</button>
+        <button id="btn-stop" class="btn btn-ghost" hidden>停止叠加层</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="side">
+        <div class="preview-card">
+          <img id="preview" alt="预览" />
+          <p class="hint">模拟画面，使用与叠加层相同的渲染管线</p>
+        </div>
+
+        <section class="card">
+          <h2>预设</h2>
+          <div class="preset-row">
+            <button class="btn btn-preset" data-preset="gentle">轻微</button>
+            <button class="btn btn-preset" data-preset="standard">标准</button>
+            <button class="btn btn-preset" data-preset="strong">强</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>颜色</h2>
+          <div class="swatches" id="swatches"></div>
+          <label class="colour-custom">
+            <input type="color" id="colour-input" />
+            <span id="colour-label">#00FF66</span>
+          </label>
+        </section>
+
+        <section class="card">
+          <h2>其他</h2>
+          <label class="switch-row">
+            <span>启动时不显示叠加层</span>
+            <input type="checkbox" id="start-hidden" class="switch" />
+          </label>
+          <button id="btn-reset" class="btn btn-ghost btn-block">恢复默认</button>
+          <label class="switch-row"><span>登录 Windows 后打开控制面板</span><input type="checkbox" id="startup" class="switch" /></label>
+          <button id="btn-import" class="btn btn-ghost">导入配置</button>
+          <button id="btn-export" class="btn btn-ghost">导出配置</button>
+          <p class="hint">关闭面板后，已启动的叠加层继续在托盘运行。</p>
+        </section>
+      </aside>
+
+      <section class="controls" id="controls"></section>
+    </main>
+    <div id="feedback" role="status" aria-live="polite"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -260,6 +260,18 @@ def _fake_scene(width: int, height: int) -> Image.Image:
     return scene
 
 
+def mock_frame(cfg: HorizonConfig, width: int = 480, height: int = 270) -> Image.Image:
+    """The overlay composited over a synthetic scene.
+
+    Used by the control panel preview: the real game frame is never captured,
+    so the preview is honest about being a mock, but it does go through the
+    exact same compositor the overlay uses.
+    """
+    return Image.alpha_composite(
+        _fake_scene(width, height), compose_image(cfg, width, height)
+    ).convert("RGB")
+
+
 def save_preview(
     cfg: HorizonConfig,
     path: str | Path,

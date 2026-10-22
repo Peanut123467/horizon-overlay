@@ -4,7 +4,7 @@
 
 **[下载 Horizon.exe](https://github.com/Peanut123467/horizon-overlay/releases/latest)** · Windows 10 / 11 · 免安装 · Apache-2.0
 
-它只是屏幕最上层的一张透明图，运行时常驻在右下角托盘里，右键即可退出
+双击打开本地控制面板，点击“启动叠加层”后启用屏幕遮罩；运行时也可通过右下角托盘操作。详见 [控制面板使用说明](docs/控制面板.md)。
 
 ![对比预览](docs/compare-standard.png)
 
@@ -44,7 +44,7 @@
 1. 到仓库的 **Releases** 页下载 `Horizon.exe`；
 2. 放到一个固定文件夹，例如 `D:\Tools\Horizon\`（**不要放下载目录**，容易被清理）；
 3. **双击 `Horizon.exe`**；
-4. 右下角托盘出现绿色小图标，屏幕上出现暗角 + 绿色边框，就是启动成功了
+4. 控制面板打开后，点击右上角“启动叠加层”；托盘出现图标，屏幕上出现暗角与边框
 
 首次启动需要 1–3 秒（单文件 exe 要先解压到临时目录），之后常驻内存约 70MB
 
@@ -70,7 +70,7 @@ pip install -e .
 
 | 命令         | 用途                     |
 | ---------- | ---------------------- |
-| `horizonw` | **日常用这个**，无控制台窗口，纯托盘常驻 |
+| `horizonw` | **日常用这个**，打开图形控制面板，无命令行窗口 |
 | `horizon`  | 带控制台，能看到实时日志，排查问题时用    |
 
 验证是否装好：
@@ -95,12 +95,12 @@ horizon --self-test
 
 ## 四、启动后怎么用
 
-这个程序**没有主窗口**，所有操作都在托盘图标和全局热键里。
+默认打开**本地图形控制面板**。可以调整参数、预览、启动或停止叠加层；运行叠加层时，也可以用托盘和全局热键操作。
 
 ### 第一次使用的四步
 
 1. **双击 `Horizon.exe`**（或命令行 `horizonw`）；
-2. 看右下角——有个绿色小图标，说明程序在跑；
+2. 在控制面板点击“启动叠加层”，右下角出现托盘图标；
 3. **把游戏设为「无边框窗口」**，然后正常进游戏，叠加层会盖在游戏画面上；
 4. 觉得挡视线或太强，按 `Ctrl+Alt+1` 换轻微档，或按 `Ctrl+Alt+H` 临时关掉。
 
@@ -131,10 +131,7 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
 
 ### 让它开机自启（可选）
 
-1. 按 `Win + R`，输入 `shell:startup`，回车；
-2. 把 `Horizon.exe` 的**快捷方式**（不是 exe 本身）拖进打开的文件夹。
-
-下次开机就会自动挂在托盘里
+在控制面板左侧下方启用“登录 Windows 后打开控制面板”。下次登录后打开面板，叠加层仍需点击按钮启动。
 
 ---
 
@@ -151,7 +148,7 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
 | **显示元素** ▸       | 边框、中心准星、锚点阵、统计面板，四项独立勾选               |
 | **重新载入配置**       | 改完 `config.json` 后不用重启，点这个立即生效        |
 | **打开配置文件夹**      | 直接打开 `%APPDATA%\horizon\`             |
-| `Horizon v0.1.0` | 版本号，不可点击                              |
+| `Horizon v0.2.0` | 版本号，不可点击                              |
 | **退出**           | 关闭程序并保存当前设置                           |
 
 所有改动**即时生效并写回 `config.json`**，不用重启。菜单里的圆点和勾选状态实时反映当前配置——用热键改过之后，再打开菜单也是对的
@@ -196,7 +193,7 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
 | 预设 | 暗角起点 / 强度 | 边框 | 适用 |
 | --- | --- | --- | --- |
 | `gentle` | inner 0.55 / strength 0.35 | 6px | 只想让边缘柔一点，几乎无感 |
-| `standard` | inner 0.34 / strength 0.55 | 8px | 默认值 |
+| `standard` | inner 0.34 / strength 0.55 | 8px | 内置标准预设 |
 | `strong` | inner 0.20 / strength 0.78 | 10px | 短时间使用；遮挡明显，不建议长期开着 |
 
 三个预设都可直接改配置微调
@@ -213,8 +210,8 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
   "frame":    { "enabled": true, "inset": 26, "width": 8, "alpha": 90 },
   "reticle":  { "enabled": true, "size": 9, "gap": 9, "alpha": 150 },
   "grid":     { "enabled": false, "spacing": 180, "radius": 2, "alpha": 16 },
-  "session":  { "enabled": true, "minutes": 40, "reminder_seconds": 15 },
-  "stats":    { "enabled": true, "position": "top-left", "font_size": 14, "alpha": 200, "refresh_ms": 1000 },
+  "session":  { "enabled": true, "minutes": 60, "reminder_seconds": 3 },
+  "stats":    { "enabled": true, "position": "top-left", "font_size": 21, "alpha": 200, "refresh_ms": 1000 },
   "color":    "#00FF66",
   "monitor": 0,
   "start_hidden": false
@@ -235,7 +232,7 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
 | `stats.refresh_ms`                             | 统计面板刷新间隔，默认 1000ms                                                    |
 | `monitor`                                      | 显示器索引，0 为主屏                                                           |
 | `vignette.enabled` / `frame.enabled` / `reticle.enabled` / `grid.enabled` / `stats.enabled` | 各模块总开关，关掉后完全不绘制该元素 |
-| `stats.font_size` | 统计面板字号，默认 14 |
+| `stats.font_size` | 统计面板字号，默认 21 |
 | `start_hidden` | 启动时不显示叠加层，只挂托盘 |
 
 改完配置后，右键托盘 → **重新载入配置** 即可生效，不用重启
@@ -290,7 +287,8 @@ horizon --preview docs/my.png --color "#FFD60A"   # 先看一眼再决定
 ## 十二、命令行
 
 ```bash
-horizon                                   # 启动叠加层
+horizon                                   # 打开控制面板
+horizon --overlay                         # 只启动后台叠加层
 horizon --preset strong --monitor 1       # 指定预设与显示器
 horizon --color "#00E5FF"                 # 临时换色
 horizon --no-stats                        # 关掉统计面板

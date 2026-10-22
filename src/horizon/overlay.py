@@ -226,18 +226,28 @@ class HorizonApp:
         self._sync_hud()
 
         win32.set_timer(self.main.hwnd, TIMER_WATCHDOG, 2000)
-        win32.set_timer(self.main.hwnd, TIMER_SESSION, 10_000)
+        win32.set_timer(self.main.hwnd, TIMER_SESSION, 1_000)
         x, y, w, h = self.geometry
         self.log(f"[horizon] overlay on monitor {idx} ({w}x{h} at {x},{y})")
 
     def _register_hotkeys(self) -> None:
-        mods = win32.MOD_CONTROL | win32.MOD_ALT
+        from .hotkeys import ACTIONS, DEFAULT_HOTKEYS, parse_binding
+
+        win32.user32.UnregisterHotKey.argtypes = [win32.wintypes.HWND, win32.ctypes.c_int]
+        for key_id in self.hotkey_map:
+            win32.user32.UnregisterHotKey(self.main.hwnd, key_id)
         self.hotkey_map = {}
         for hotkey_id, label, candidates in HOTKEY_BINDINGS:
-            for name in candidates:
-                if win32.register_hotkey(self.main.hwnd, hotkey_id, mods, VK[name]):
-                    self.hotkey_map[hotkey_id] = name
-                    self.log(f"[horizon] hotkey: Ctrl+Alt+{name}  {label}")
+            action = ACTIONS[hotkey_id - 1]
+            requested = self.cfg.hotkeys[action]
+            options = [requested]
+            if requested == DEFAULT_HOTKEYS[action]:
+                options += [f"Ctrl+Alt+{key}" for key in candidates[1:]]
+            for binding in options:
+                mods, vk = parse_binding(binding)
+                if win32.register_hotkey(self.main.hwnd, hotkey_id, mods, vk):
+                    self.hotkey_map[hotkey_id] = binding
+                    self.log(f"[horizon] hotkey: {binding}  {label}")
                     break
             else:
                 self.log(f"[horizon] hotkey unavailable for '{label}' (all candidates taken)")
@@ -259,6 +269,9 @@ class HorizonApp:
         self.log("[horizon] first-run tray hint shown on the overlay")
 
     def _teardown(self) -> None:
+        if self._tray is not None:
+            self._tray.stop()
+            self._tray = None
         for layer in (self.hud, self.main):
             if layer is not None:
                 layer.release()
@@ -390,7 +403,7 @@ class HorizonApp:
             return
         if now - self._session_start >= s.minutes * 60:
             self._reminded = True
-            self._notice_until = now + max(5, s.reminder_seconds)
+            self._notice_until = now + max(3, s.reminder_seconds)
             self.redraw(force=True)
 
     def _notice_text(self) -> str | None:
@@ -464,6 +477,7 @@ class HorizonApp:
             win32.set_timer(self.hud.hwnd, TIMER_STATS, max(250, self.cfg.stats.refresh_ms))
         else:
             self.hud.place(self._hud_rect(w, h))
+        win32.set_timer(self.hud.hwnd, TIMER_STATS, max(250, self.cfg.stats.refresh_ms))
 
         self.hud.present(bgra)
         self._hud_last_text = text
@@ -499,7 +513,25 @@ class HorizonApp:
             return 0  # not ours -- let DefWindowProc handle it
 
         patch = payload.get("patch", payload)
+        previous = self.cfg
         self.cfg = apply_patch(self.cfg, patch)
+        if self.cfg.hotkeys != previous.hotkeys:
+            self._register_hotkeys()
+            from .hotkeys import ACTIONS
+
+            changed = [
+                index + 1
+                for index, action in enumerate(ACTIONS)
+                if self.cfg.hotkeys[action] != previous.hotkeys[action]
+            ]
+            if any(key_id not in self.hotkey_map for key_id in changed):
+                self.cfg = previous
+                self._register_hotkeys()
+                return 0
+        # Persist before acknowledging so the next panel edit reads fresh state.
+        if self.cfg_path:
+            save(self.cfg, self.cfg_path)
+        self._on_display_change()
         win32.set_timer(self.main.hwnd, TIMER_APPLY, 80)
         return 1
 

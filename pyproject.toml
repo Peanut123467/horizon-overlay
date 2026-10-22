@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "horizon-overlay"
-version = "0.1.0"
+version = "0.2.0"
 description = "A click-through Windows overlay for players who get motion discomfort in 3D games. No injection, no game files, no telemetry."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,6 +26,7 @@ dependencies = [
     "numpy>=1.24",
     "pillow>=10.0",
     "pystray>=0.19",
+    "pywebview>=6.2,<7",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +42,9 @@ horizonw = "horizon.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+horizon = ["console/ui/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

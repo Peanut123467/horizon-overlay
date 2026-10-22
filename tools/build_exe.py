@@ -15,6 +15,7 @@ Notes
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +40,8 @@ def build() -> int:
         str(ROOT / "src"),
         "--collect-submodules",
         "pystray",
+        "--add-data",
+        str(ROOT / "src" / "horizon" / "console" / "ui") + os.pathsep + "horizon/console/ui",
         str(ROOT / "tools" / "entry.py"),
     ]
     print(" ".join(args))

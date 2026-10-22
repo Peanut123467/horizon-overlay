@@ -36,6 +36,16 @@ user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
 user32.FindWindowW.restype = wintypes.HWND
 user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.SendMessageW.restype = wintypes.LPARAM
+user32.SendMessageTimeoutW.argtypes = [
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+    wintypes.UINT,
+    wintypes.UINT,
+    ctypes.POINTER(ctypes.c_size_t),
+]
+user32.SendMessageTimeoutW.restype = wintypes.LPARAM
 
 
 def find_overlay() -> int:
@@ -53,8 +63,11 @@ def send_payload(hwnd: int, payload: dict[str, Any], tag: int = TAG_PATCH) -> bo
     # LPARAM is an integer type, so the pointer has to be taken as c_void_p and
     # unwrapped -- ctypes.cast(..., LPARAM) is a TypeError.
     address = ctypes.cast(ctypes.byref(struct), ctypes.c_void_p).value
-    result = user32.SendMessageW(wintypes.HWND(hwnd), WM_COPYDATA, 0, address or 0)
-    return bool(result)
+    result = ctypes.c_size_t()
+    delivered = user32.SendMessageTimeoutW(
+        wintypes.HWND(hwnd), WM_COPYDATA, 0, address or 0, 0x0002, 3000, ctypes.byref(result)
+    )
+    return bool(delivered and result.value == 1)
 
 
 def read_payload(lparam: int) -> dict[str, Any] | None:
