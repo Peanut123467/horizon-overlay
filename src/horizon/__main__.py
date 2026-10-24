@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
 
 from . import __version__
-from .config import PRESETS, config_path, load, preset, save
+from .config import PRESETS, apply_patch, config_path, load, preset, save
 
 # Launched from the packaged exe (or `horizonw`) there is no console at all:
 # sys.stdout/sys.stderr are None and a bare print() would raise. Remember that
@@ -86,13 +87,14 @@ def _resolve_config(args) -> tuple:
     cfg = load(path)
     if args.preset:
         cfg = preset(args.preset, cfg)
+    overrides = {}
     if args.monitor is not None:
-        cfg.monitor = args.monitor
-    if args.color:
-        cfg.color = args.color
+        overrides["monitor"] = args.monitor
+    if args.color is not None:
+        overrides["color"] = args.color
     if args.no_stats:
-        cfg.stats.enabled = False
-    return cfg, path
+        overrides["stats"] = {"enabled": False}
+    return apply_patch(cfg, overrides), path
 
 
 def _self_test() -> int:
@@ -157,6 +159,15 @@ def _make_logger():
     import time
 
     log_path = config_path().parent / "horizon.log"
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        config_logger = logging.getLogger("horizon.config")
+        if not config_logger.handlers:
+            handler = logging.FileHandler(log_path, encoding="utf-8")
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            config_logger.addHandler(handler)
+    except OSError:
+        pass
 
     def _log(message: str) -> None:
         try:
@@ -176,7 +187,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         return _self_test()
 
-    cfg, path = _resolve_config(args)
+    log = _make_logger()
+    try:
+        cfg, path = _resolve_config(args)
+    except OSError as exc:
+        log(f"[horizon] could not read or back up config; original file kept: {exc!r}")
+        return 1
 
     if args.print_config:
         import json
@@ -226,23 +242,34 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_console(cfg_path=path)
 
-    log = _make_logger()
-
     from .launcher import single_instance
     from .overlay import HorizonApp
 
     try:
         with single_instance("overlay") as unique:
             if unique:
-                try:
-                    save(cfg, path)
-                except OSError as exc:
-                    log(
-                        f"[horizon] warning: could not write config ({exc!r}); changes will not persist"
-                    )
-                HorizonApp(cfg, path, log=log).run(
+                temporary = bool(
+                    args.preset
+                    or args.color is not None
+                    or args.monitor is not None
+                    or args.no_stats
+                )
+                if not temporary:
+                    try:
+                        save(cfg, path)
+                    except OSError as exc:
+                        log(
+                            f"[horizon] warning: could not write config ({exc!r}); changes will not persist"
+                        )
+                HorizonApp(cfg, path, log=log, persist_config=not temporary).run(
                     duration=args.duration, with_tray=not args.no_tray
                 )
+            else:
+                log("[horizon] overlay already running")
+                if not _HAS_CONSOLE:
+                    from .launcher import launch
+
+                    launch("--console", "--config", str(path))
     except Exception:
         import traceback
 

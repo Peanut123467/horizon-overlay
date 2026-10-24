@@ -110,3 +110,33 @@ def test_result_is_a_new_object():
     cfg = default_config()
     assert apply_patch(cfg, {"color": "#FFFFFF"}) is not cfg
     assert isinstance(apply_patch(cfg, {}), HorizonConfig)
+
+
+@pytest.mark.parametrize("value", ["false", "False", "  OFF  ", "0", "no"])
+def test_false_strings_disable_boolean_fields(value):
+    cfg = default_config()
+    cfg.start_hidden = True
+    new = apply_patch(cfg, {"frame": {"enabled": value}, "start_hidden": value})
+    assert new.frame.enabled is False
+    assert new.start_hidden is False
+
+
+@pytest.mark.parametrize("value", ["true", "YES", "1", " on "])
+def test_true_strings_enable_boolean_fields(value):
+    new = apply_patch(default_config(), {"grid": {"enabled": value}})
+    assert new.grid.enabled is True
+
+
+@pytest.mark.parametrize("value", ["maybe", "", [], {}, None, 2])
+def test_invalid_booleans_keep_current_value(value):
+    cfg = default_config()
+    new = apply_patch(cfg, {"grid": {"enabled": value}, "frame": {"enabled": value}})
+    assert new.grid.enabled is False
+    assert new.frame.enabled is True
+
+
+@pytest.mark.parametrize("inner,outer", [(1.5, 0.5), (0.8, 0.5), (0.5, 0.5), (0.51, 0.5)])
+def test_vignette_radii_always_have_a_smooth_transition(inner, outer):
+    cfg = apply_patch(default_config(), {"vignette": {"inner": inner, "outer": outer}})
+    assert cfg.vignette.inner < cfg.vignette.outer
+    assert cfg.vignette.outer - cfg.vignette.inner >= 0.05 - 1e-9

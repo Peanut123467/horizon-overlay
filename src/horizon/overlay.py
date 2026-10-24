@@ -64,15 +64,15 @@ HOTKEY_COLOR = 8
 # Each action lists candidate keys in order of preference. The first one that
 # Windows actually grants wins -- another app may already own Ctrl+Alt+T, and
 # we would rather fall back than lose the action entirely.
-HOTKEY_BINDINGS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
-    (HOTKEY_TOGGLE, "显示/隐藏", ("H", "F9")),
-    (HOTKEY_GENTLE, "轻微", ("1", "F7")),
-    (HOTKEY_STANDARD, "标准", ("2", "F8")),
-    (HOTKEY_STRONG, "强", ("3",)),
-    (HOTKEY_RETICLE, "准星", ("T", "F10")),
-    (HOTKEY_STATS, "统计面板", ("S", "F11")),
-    (HOTKEY_COLOR, "切换颜色", ("C", "F12")),
-    (HOTKEY_QUIT, "退出", ("Q",)),
+HOTKEY_BINDINGS: tuple[tuple[int, str, str, tuple[str, ...]], ...] = (
+    (HOTKEY_TOGGLE, "toggle", "显示/隐藏", ("H", "F9")),
+    (HOTKEY_GENTLE, "gentle", "轻微", ("1", "F7")),
+    (HOTKEY_STANDARD, "standard", "标准", ("2", "F8")),
+    (HOTKEY_STRONG, "strong", "强", ("3",)),
+    (HOTKEY_RETICLE, "reticle", "准星", ("T", "F10")),
+    (HOTKEY_STATS, "stats", "统计面板", ("S", "F11")),
+    (HOTKEY_COLOR, "color", "切换颜色", ("C", "F12")),
+    (HOTKEY_QUIT, "quit", "退出", ("Q",)),
 )
 
 # WM_APP offsets used by the tray thread
@@ -168,10 +168,13 @@ class HorizonApp:
         cfg: HorizonConfig,
         cfg_path: Path | None = None,
         log: Callable[[str], None] = print,
+        *,
+        persist_config: bool = True,
     ) -> None:
         self.cfg = cfg
         self.cfg_path = cfg_path
         self.log = log
+        self._persist_config = persist_config
 
         self.main: _Layer | None = None
         self.hud: _Layer | None = None
@@ -200,16 +203,18 @@ class HorizonApp:
 
     def run(self, duration: float | None = None, with_tray: bool = True) -> None:
         win32.set_dpi_aware()
-        self._create()
-        if with_tray:
-            from .tray import start_tray
+        try:
+            self._create()
+            if with_tray:
+                from .tray import start_tray
 
-            self._tray = start_tray(self, self.log)
-            self._maybe_show_tray_hint()
-        if duration:
-            win32.set_timer(self.hwnd, TIMER_AUTOQUIT, int(duration * 1000))
-        win32.run_message_loop()
-        self._teardown()
+                self._tray = start_tray(self, self.log)
+                self._maybe_show_tray_hint()
+            if duration is not None:
+                win32.set_timer(self.hwnd, TIMER_AUTOQUIT, max(1, int(duration * 1000)))
+            win32.run_message_loop()
+        finally:
+            self._teardown()
 
     def _create(self) -> None:
         monitors = win32.list_monitors()
@@ -235,14 +240,10 @@ class HorizonApp:
         self.log(f"[horizon] overlay on monitor {idx} ({w}x{h} at {x},{y})")
 
     def _register_hotkeys(self) -> None:
-        from .hotkeys import ACTIONS, DEFAULT_HOTKEYS, parse_binding
+        from .hotkeys import DEFAULT_HOTKEYS, parse_binding
 
-        win32.user32.UnregisterHotKey.argtypes = [win32.wintypes.HWND, win32.ctypes.c_int]
-        for key_id in self.hotkey_map:
-            win32.user32.UnregisterHotKey(self.main.hwnd, key_id)
-        self.hotkey_map = {}
-        for hotkey_id, label, candidates in HOTKEY_BINDINGS:
-            action = ACTIONS[hotkey_id - 1]
+        self._unregister_hotkeys()
+        for hotkey_id, action, label, candidates in HOTKEY_BINDINGS:
             requested = self.cfg.hotkeys[action]
             options = [requested]
             if requested == DEFAULT_HOTKEYS[action]:
@@ -255,6 +256,12 @@ class HorizonApp:
                     break
             else:
                 self.log(f"[horizon] hotkey unavailable for '{label}' (all candidates taken)")
+
+    def _unregister_hotkeys(self) -> None:
+        if self.main is not None and self.main.hwnd:
+            for key_id in self.hotkey_map:
+                win32.user32.UnregisterHotKey(self.main.hwnd, key_id)
+        self.hotkey_map.clear()
 
     def _maybe_show_tray_hint(self) -> None:
         """First run: point at the tray icon *on the overlay itself*.
@@ -269,18 +276,22 @@ class HorizonApp:
         self._persist()
         self._hint_until = time.monotonic() + 8.0
         win32.set_timer(self.main.hwnd, TIMER_HINT, 1000)
-        self.redraw(force=True)
+        self.redraw()
         self.log("[horizon] first-run tray hint shown on the overlay")
 
     def _teardown(self) -> None:
         if self._tray is not None:
             self._tray.stop()
             self._tray = None
-        for layer in (self.hud, self.main):
-            if layer is not None:
-                layer.release()
+        self._unregister_hotkeys()
+        layers = (self.hud, self.main)
         self.hud = None
         self.main = None
+        for layer in layers:
+            if layer is not None:
+                if layer.hwnd:
+                    win32.destroy_window(layer.hwnd)
+                layer.release()
 
     # -------------------------------------------------------------- messages
 
@@ -319,7 +330,13 @@ class HorizonApp:
             win32.destroy_window(hwnd)
             return 0
         if msg == win32.WM_DESTROY:
-            if hwnd == self.hwnd:
+            if self.hud is not None and hwnd == self.hud.hwnd:
+                self.hud.release()
+                self.hud = None
+                self._hud_last_text = None
+            elif self.main is not None and hwnd == self.hwnd:
+                self._unregister_hotkeys()
+                self.main.hwnd = None
                 win32.post_quit()
             return 0
         return win32.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -348,7 +365,7 @@ class HorizonApp:
             self.cfg = preset(name, self.cfg)
             self.log(f"[horizon] preset -> {name}")
         self._persist()
-        self.redraw(force=True)
+        self.redraw()
         self._sync_hud()
 
     def _on_timer(self, timer_id: int) -> None:
@@ -365,13 +382,13 @@ class HorizonApp:
             win32.kill_timer(self.main.hwnd, TIMER_APPLY)
             self._apply_pending = False
             self._persist()
-            self.redraw(force=True)
+            self.redraw()
             self._sync_hud()
         elif timer_id == TIMER_HINT:
             if time.monotonic() >= self._hint_until:
                 self._hint_until = 0.0
                 win32.kill_timer(self.main.hwnd, TIMER_HINT)
-                self.redraw(force=True)
+                self.redraw()
         elif timer_id == TIMER_AUTOQUIT:
             win32.destroy_window(self.hwnd)
 
@@ -400,7 +417,7 @@ class HorizonApp:
             self._notice_until = 0.0
             self._session_start = now
             self._reminded = False
-            self.redraw(force=True)
+            self.redraw()
             return
 
         s = self.cfg.session
@@ -409,7 +426,7 @@ class HorizonApp:
         if now - self._session_start >= s.minutes * 60:
             self._reminded = True
             self._notice_until = now + max(3, s.reminder_seconds)
-            self.redraw(force=True)
+            self.redraw()
 
     def _notice_text(self) -> str | None:
         now = time.monotonic()
@@ -417,7 +434,8 @@ class HorizonApp:
             return "Horizon 已启动 · 图标在右下角托盘，右键可退出"
         if not self._notice_until or now >= self._notice_until:
             return None
-        return f"已连续游玩 {self.cfg.session.minutes} 分钟 · 建议起身活动 1–2 分钟"
+        elapsed_minutes = max(0, int((now - self._session_start) // 60))
+        return f"已连续游玩 {elapsed_minutes} 分钟 · 建议起身活动 1–2 分钟"
 
     # ----------------------------------------------------------------- paint
 
@@ -440,7 +458,17 @@ class HorizonApp:
             return
         notice = self._notice_text()
         key = json.dumps(
-            {"cfg": self.cfg.to_dict(), "notice": notice}, sort_keys=True, ensure_ascii=False
+            {
+                "cfg": {
+                    k: v
+                    for k, v in self.cfg.to_dict().items()
+                    if k in ("vignette", "frame", "triangles", "reticle", "grid", "color")
+                },
+                "rect": self.main.rect,
+                "notice": notice,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
         )
         if not force and key == self._render_key:
             return
@@ -468,9 +496,10 @@ class HorizonApp:
 
         if not self.cfg.stats.enabled:
             if self.hud is not None:
-                win32.destroy_window(self.hud.hwnd)
-                self.hud.release()
+                hud = self.hud
                 self.hud = None
+                win32.destroy_window(hud.hwnd)
+                hud.release()
             return
 
         text = self._hud_text()
@@ -500,7 +529,7 @@ class HorizonApp:
         self._hud_last_text = text
 
     def _hud_text(self) -> str:
-        return metrics.snapshot(self._draw_ms).render()
+        return metrics.snapshot(self._draw_ms, hwnd=self.hwnd).render()
 
     # ----------------------------------------------------------------- state
 
@@ -511,30 +540,38 @@ class HorizonApp:
         coalesced on an 80 ms timer without restarting its deadline: dragging fires patches
         a second and a full-screen recompose costs ~140 ms at 1440p.
         """
-        from .ipc import read_payload
+        from .ipc import read_payload, write_state
 
         payload = read_payload(lparam)
         if payload is None:
-            return 0  # not ours -- let DefWindowProc handle it
+            return 0  # unrecognized or malformed payload; do not acknowledge
+        if payload.get("query") == "state":
+            return int(
+                write_state(
+                    payload.get("buffer"),
+                    {
+                        "config": self.cfg.to_dict(),
+                        "temporary_session": not self._persist_config,
+                    },
+                )
+            )
 
         patch = payload.get("patch", payload)
         previous = self.cfg
         self.cfg = apply_patch(self.cfg, patch)
         if self.cfg.hotkeys != previous.hotkeys:
             self._register_hotkeys()
-            from .hotkeys import ACTIONS
-
             changed = [
-                index + 1
-                for index, action in enumerate(ACTIONS)
+                key_id
+                for key_id, action, _label, _candidates in HOTKEY_BINDINGS
                 if self.cfg.hotkeys[action] != previous.hotkeys[action]
             ]
             if any(key_id not in self.hotkey_map for key_id in changed):
                 self.cfg = previous
                 self._register_hotkeys()
-                return 0
+                return 2  # delivered, but the requested hotkey is unavailable
         # Persist before acknowledging so the next panel edit reads fresh state.
-        if self.cfg_path:
+        if self.cfg_path and self._persist_config:
             save(self.cfg, self.cfg_path)
         self._on_display_change()
         if not self._apply_pending:
@@ -559,7 +596,7 @@ class HorizonApp:
             refresh_icon(self._tray, self.cfg.color)
 
         self._persist()
-        self.redraw(force=True)
+        self.redraw()
         self._sync_hud()
 
     def reload_config(self) -> None:
@@ -570,14 +607,13 @@ class HorizonApp:
 
         try:
             fresh = load(self.cfg_path)
-        except Exception as exc:  # defensive: load() already swallows most cases
+        except Exception as exc:
             self.log(f"[horizon] reload failed: {exc!r}")
             return
         # Keep the monitor actually in use; changing it needs a rebuild.
         fresh.monitor = self.cfg.monitor
         self.cfg = fresh
-        self._render_key = None
-        self.redraw(force=True)
+        self.redraw()
         self._sync_hud()
         from .tray import refresh_icon
 
@@ -585,7 +621,7 @@ class HorizonApp:
         self.log("[horizon] config reloaded from disk")
 
     def _persist(self) -> None:
-        if self.cfg_path is None:
+        if self.cfg_path is None or not self._persist_config:
             return
         try:
             save(self.cfg, self.cfg_path)

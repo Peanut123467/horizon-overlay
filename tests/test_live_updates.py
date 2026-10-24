@@ -1,4 +1,10 @@
+import sys
 from types import SimpleNamespace
+
+import pytest
+
+if sys.platform != "win32":
+    pytest.skip("Windows live overlay updates", allow_module_level=True)
 
 from horizon import ipc, win32
 from horizon.config import default_config

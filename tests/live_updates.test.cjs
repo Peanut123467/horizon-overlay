@@ -33,18 +33,23 @@ function harness(latency = 5) {
   }
   const delay = () => new Promise(resolve => later(resolve, latency));
   const copy = value => JSON.parse(JSON.stringify(value));
+  let saved = { frame: { width: 1, alpha: 100 } };
   const api = {
     monitors: async () => [],
     hotkey_options: async () => ({}),
     startup: async () => false,
-    state: async () => ({ config: { frame: { width: 1, alpha: 100 } }, overlay_alive: false }),
+    state: async () => ({ config: copy(saved), overlay_alive: false }),
     async patch(body) {
       const snapshot = copy(body);
       patches.push(snapshot);
+      for (const [group, values] of Object.entries(snapshot)) {
+        saved[group] = { ...saved[group], ...values };
+      }
+      const config = copy(saved);
       peak.patch = Math.max(peak.patch, ++active.patch);
       await delay();
       --active.patch;
-      return { overlay_alive: false };
+      return { config, overlay_alive: false };
     },
     async preview(cfg) {
       const snapshot = copy(cfg);
@@ -60,10 +65,10 @@ function harness(latency = 5) {
     setTimeout: later, clearTimeout: id => timers.delete(id), __api: api, __errors: errors,
     setInterval: fn => { intervals.push(fn); return intervals.length; },
     window: { addEventListener() {}, pywebview: { api } },
-    document: { addEventListener() {}, querySelector: () => image, querySelectorAll: () => [], hasFocus: () => false, activeElement: { tagName: 'BODY' } },
+    document: { addEventListener() {}, querySelector: selector => selector === '[data-recording="true"]' ? null : image, querySelectorAll: () => [], hasFocus: () => false, activeElement: { tagName: 'BODY' } },
   });
   vm.runInContext(readFileSync(join(__dirname, '../src/horizon/console/ui/app.js'), 'utf8'), context);
-  vm.runInContext('api=__api; cfg={frame:{width:1,alpha:100}}; setStatus=()=>{}; showError=e=>__errors.push(String(e));', context);
+  vm.runInContext('api=__api; cfg={frame:{width:1,alpha:100}}; setStatus=()=>{}; showError=e=>__errors.push(String(e)); renderState=state=>{cfg=state.config;queuePreview();};', context);
   const run = text => vm.runInContext(text, context, { timeout: 1000 });
   return { run, tick, frames, patches, previews, errors, peak, api, delay, intervals };
 }
@@ -151,4 +156,28 @@ test('an already running background poll cannot restore stale slider values', as
   assert.equal(h.run('cfg.frame.width'), 99, 'stale polling response replaced the current slider value');
   assert.equal(h.patches.at(-1).frame.width, 99);
   assert.equal(h.frames.at(-1), 'frame-99');
+});
+
+test('patch acknowledgement cannot overwrite a newer slider edit', async () => {
+  const h = harness(80);
+  h.run("setValue('frame','width',21)");
+  await h.tick(60);
+  h.run("setValue('frame','width',31)");
+  await h.tick(80);
+  assert.equal(h.run('cfg.frame.width'), 31);
+  await h.tick(200);
+  assert.equal(h.run('cfg.frame.width'), 31);
+  assert.equal(h.errors.length, 0);
+});
+
+test('backend canonical values are used after the final edit completes', async () => {
+  const h = harness(40);
+  h.api.patch = async () => {
+    await h.delay();
+    return { config: { frame: { width: 10, alpha: 100 } }, overlay_alive: false };
+  };
+  h.run("setValue('frame','width',99)");
+  await h.tick(200);
+  assert.equal(h.run('cfg.frame.width'), 10);
+  assert.equal(h.frames.at(-1), 'frame-10');
 });

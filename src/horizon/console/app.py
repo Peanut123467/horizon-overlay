@@ -37,17 +37,30 @@ class Api:
         self._cfg_path = cfg_path or config_path()
         self._window = None
         self._lock = threading.RLock()
+        self._temporary_session = False
 
     # -- helpers -----------------------------------------------------------
 
     def _load(self) -> HorizonConfig:
-        return load(self._cfg_path)
+        # State/preview requests run on separate WebView threads. They must not
+        # reset session provenance while a patch is between read and commit.
+        with self._lock:
+            hwnd = ipc.find_overlay()
+            if hwnd:
+                state = ipc.query_state(hwnd)
+                if state is None:
+                    raise RuntimeError("叠加层未响应，请重试或重新启动叠加层")
+                self._temporary_session = bool(state.get("temporary_session"))
+                return apply_patch(HorizonConfig(), state["config"])
+            self._temporary_session = False
+            return load(self._cfg_path)
 
     def _payload(self, cfg: HorizonConfig, alive: bool) -> dict[str, Any]:
         return {
             "config": cfg.to_dict(),
             "overlay_alive": alive,
             "config_path": str(self._cfg_path),
+            "temporary_session": self._temporary_session and alive,
         }
 
     def _commit(self, cfg: HorizonConfig, changes: dict[str, Any]) -> dict[str, Any]:
@@ -55,10 +68,10 @@ class Api:
         hwnd = ipc.find_overlay()
         if hwnd:
             if not ipc.send_payload(hwnd, {"patch": changes}):
-                raise RuntimeError(
-                    "叠加层未响应或快捷键被其他程序占用，设置尚未保存，请更换键位或重试"
-                )
+                raise RuntimeError("叠加层未响应，设置尚未保存，请重试或重新启动叠加层")
         else:
+            if self._temporary_session:
+                raise RuntimeError("临时会话已结束，设置尚未保存，请刷新后重试")
             save(cfg, self._cfg_path)
         return self._payload(cfg, bool(hwnd))
 
@@ -66,17 +79,21 @@ class Api:
 
     def state(self) -> dict[str, Any]:
         """Current config plus whether the overlay process is up."""
-        return self._payload(self._load(), bool(ipc.find_overlay()))
+        with self._lock:
+            return self._payload(self._load(), bool(ipc.find_overlay()))
 
     def patch(self, changes: dict[str, Any]) -> dict[str, Any]:
         """Validate a change, forward it, and return the resulting config."""
         with self._lock:
+            current = self._load()
             if isinstance(changes, dict) and "hotkeys" in changes:
                 from ..hotkeys import validate_bindings
 
-                validate_bindings({**self._load().hotkeys, **changes["hotkeys"]})
-            cfg = apply_patch(self._load(), changes or {})
-            if cfg.hotkeys != self._load().hotkeys and not ipc.find_overlay():
+                if not isinstance(changes["hotkeys"], dict):
+                    raise ValueError("快捷键配置必须是对象")
+                validate_bindings({**current.hotkeys, **changes["hotkeys"]})
+            cfg = apply_patch(current, changes or {})
+            if cfg.hotkeys != current.hotkeys and not ipc.find_overlay():
                 self._check_hotkeys(cfg)
             return self._commit(cfg, changes or {})
 
@@ -106,11 +123,12 @@ class Api:
 
     def reset(self) -> dict[str, Any]:
         """Restore every visual parameter to the built-in defaults."""
-        current = self._load()
-        cfg = HorizonConfig()
-        cfg.monitor = current.monitor
-        cfg.tray_hint_shown = current.tray_hint_shown
-        return self._commit(cfg, cfg.to_dict())
+        with self._lock:
+            current = self._load()
+            cfg = HorizonConfig()
+            cfg.monitor = current.monitor
+            cfg.tray_hint_shown = current.tray_hint_shown
+            return self._commit(cfg, cfg.to_dict())
 
     def monitors(self) -> list[dict[str, Any]]:
         """Enumerate monitors so the page can offer a target picker."""
@@ -220,22 +238,19 @@ def load_html() -> str:
 
 
 def prepare_webview_env() -> None:
-    """Work around a blank WebView2 window.
+    """Apply an explicitly requested WebView2 workaround.
 
     On machines where the GPU process cannot composite (virtual machines, some
     remote sessions, certain driver/WebView2 combinations) the page loads and
     ``evaluate_js`` works, but nothing is ever painted -- the window stays
     black. Running the GPU thread inside the browser process fixes it.
 
-    Measured on the affected machine: default args painted 0% of the window,
-    ``--in-process-gpu`` painted it correctly. Users who know better can
-    override the whole flag string via ``HORIZON_WEBVIEW_ARGS``.
+    Set ``HORIZON_WEBVIEW_ARGS=--in-process-gpu`` on affected machines.
+    Leave WebView2's process isolation intact by default.
     """
     override = os.environ.get("HORIZON_WEBVIEW_ARGS")
     if override is not None:
         os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = override
-    else:
-        os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--in-process-gpu")
 
 
 def run(cfg_path: Path | None = None) -> int:

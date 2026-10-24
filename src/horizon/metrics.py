@@ -14,12 +14,16 @@ import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass
 
-from .win32 import gdi32, kernel32, user32
+from .win32 import MONITORINFO, gdi32, kernel32, user32
 
 __all__ = ["Metrics", "snapshot", "process_memory_mb", "system_memory_percent", "refresh_rate_hz"]
 
 _VREFRESH = 116
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+class MONITORINFOEXW(MONITORINFO):
+    _fields_ = [("szDevice", wintypes.WCHAR * 32)]
 
 
 class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
@@ -71,6 +75,10 @@ user32.GetDC.argtypes = [wintypes.HWND]
 user32.GetDC.restype = wintypes.HDC
 user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
 user32.ReleaseDC.restype = ctypes.c_int
+user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+user32.MonitorFromWindow.restype = wintypes.HMONITOR
+gdi32.CreateDCW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR, ctypes.c_void_p]
+gdi32.CreateDCW.restype = wintypes.HDC
 
 
 @dataclass(frozen=True)
@@ -111,25 +119,38 @@ def system_memory_percent() -> int:
     return int(status.dwMemoryLoad)
 
 
-def refresh_rate_hz() -> int:
-    """Current display refresh rate for the primary monitor.
+def refresh_rate_hz(hwnd=None) -> int:
+    """Refresh rate of the window's monitor (primary when no window is given).
 
     ``GetDeviceCaps(VREFRESH)`` can report 0 or 1 for "hardware default", in
     which case we return 0 and the HUD omits the field rather than guessing.
     """
-    hdc = user32.GetDC(None)
+    if hwnd is not None:
+        monitor = user32.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+        if not monitor:
+            return 0
+        info = MONITORINFOEXW()
+        info.cbSize = ctypes.sizeof(info)
+        if not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return 0
+        hdc = gdi32.CreateDCW("DISPLAY", info.szDevice, None, None)
+    else:
+        hdc = user32.GetDC(None)
     if not hdc:
         return 0
     try:
         hz = int(gdi32.GetDeviceCaps(hdc, _VREFRESH))
     finally:
-        user32.ReleaseDC(None, hdc)
+        if hwnd is not None:
+            gdi32.DeleteDC(hdc)
+        else:
+            user32.ReleaseDC(None, hdc)
     return hz if hz > 1 else 0
 
 
-def snapshot(draw_ms: float = 0.0) -> Metrics:
+def snapshot(draw_ms: float = 0.0, *, hwnd=None) -> Metrics:
     return Metrics(
-        refresh_hz=refresh_rate_hz(),
+        refresh_hz=refresh_rate_hz(hwnd),
         process_mb=process_memory_mb(),
         system_percent=system_memory_percent(),
         draw_ms=draw_ms,

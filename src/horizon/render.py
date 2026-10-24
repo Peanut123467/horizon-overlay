@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from .config import HorizonConfig
+from .config import HorizonConfig, normalize_vignette_radii
 
 __all__ = [
     "compose",
@@ -50,11 +50,12 @@ def parse_color(value: str) -> tuple[int, int, int]:
         return DEFAULT_COLOR
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=1)
 def _vignette_alpha(
     width: int, height: int, inner: float, outer: float, strength: float
 ) -> np.ndarray:
     """Radial alpha ramp, 0 at centre -> ``strength`` at the corners."""
+    inner, outer = normalize_vignette_radii(inner, outer)
     ys = np.linspace(-1.0, 1.0, height, dtype=np.float32)[:, None]
     xs = np.linspace(-1.0, 1.0, width, dtype=np.float32)[None, :]
     dist = np.sqrt(xs * xs + ys * ys) / np.float32(np.sqrt(2.0))
@@ -81,9 +82,7 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 def _draw_frame(draw: ImageDraw.ImageDraw, w: int, h: int, cfg: HorizonConfig, rgb) -> None:
     f = cfg.frame
-    inset = max(0, f.inset)
-    if inset * 2 >= min(w, h):
-        return
+    inset = max(0, min(f.inset, (min(w, h) - 1) // 2))
     draw.rectangle(
         (inset, inset, w - 1 - inset, h - 1 - inset),
         outline=(*rgb, max(0, min(255, f.alpha))),

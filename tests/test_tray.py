@@ -5,7 +5,12 @@ Everything here is pure logic -- no window is created and no icon is shown.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
+
+if sys.platform != "win32":
+    pytest.skip("Windows tray integration", allow_module_level=True)
 
 from horizon.config import COLOR_PALETTE, PRESETS, default_config, preset
 from horizon.overlay import (

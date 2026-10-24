@@ -261,3 +261,30 @@ def test_stats_config_roundtrip(tmp_path):
     assert loaded.stats.enabled is False
     assert loaded.stats.position == "bottom-right"
     assert loaded.stats.font_size == 18
+
+
+def test_reversed_vignette_radii_keep_visible_gradient():
+    cfg = _vignette_only(inner=1.5, outer=0.5, strength=0.8)
+    alpha = np.array(compose_image(cfg, 320, 180))[..., 3]
+    assert alpha.max() > 0
+    assert len(np.unique(alpha)) > 10
+    assert alpha[90, 160] == 0
+
+
+def test_vignette_parameter_changes_do_not_retain_multiple_screen_buffers():
+    from horizon.render import _vignette_alpha
+
+    _vignette_alpha.cache_clear()
+    for step in range(8):
+        _vignette_alpha(320, 180, 0.34, 1.06, (step + 1) / 10)
+    assert _vignette_alpha.cache_info().currsize == 1
+
+
+def test_border_with_large_inset_still_paints_on_small_display():
+    cfg = HorizonConfig(
+        vignette=Vignette(enabled=False),
+        frame=Frame(enabled=True, inset=400),
+        reticle=Reticle(enabled=False),
+        grid=AnchorGrid(enabled=False),
+    )
+    assert np.array(compose_image(cfg, 1280, 720))[..., 3].max() > 0

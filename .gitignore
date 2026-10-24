@@ -12,7 +12,5 @@ venv/
 docs/_*.png
 
 # PyInstaller
-dist/
-build/
 *.spec
 *.exe

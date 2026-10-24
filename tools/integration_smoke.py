@@ -92,7 +92,7 @@ def main():
             try:
                 try:
                     api.patch({"hotkeys": {"reticle": "Ctrl+Alt+Shift+F5"}})
-                except RuntimeError:
+                except ValueError:
                     pass
                 else:
                     raise AssertionError("occupied hotkey was accepted")
@@ -108,6 +108,31 @@ def main():
         assert not api.stop_overlay()["overlay_alive"]
         children[0].wait(timeout=5)
         print("PASS clean overlay shutdown", flush=True)
+        original_bytes = api._cfg_path.read_bytes()
+        temporary = original_launch(
+            "--overlay",
+            "--config",
+            str(api._cfg_path),
+            "--color",
+            "#ABCDEF",
+            "--duration",
+            "30",
+            "--no-tray",
+        )
+        children.append(temporary)
+        deadline = time.monotonic() + 15
+        while not ipc.find_overlay() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        state = api.state()
+        assert state["temporary_session"] and state["config"]["color"] == "#ABCDEF"
+        api.patch({"frame": {"width": 12}})
+        state = api.patch({"frame": {"alpha": 100}})
+        assert state["config"]["frame"]["width"] == 12
+        assert api.state()["config"]["frame"]["width"] == 12
+        assert api._cfg_path.read_bytes() == original_bytes
+        assert not api.stop_overlay()["overlay_alive"]
+        temporary.wait(timeout=5)
+        print("PASS temporary live state stays coherent without saving CLI overrides", flush=True)
     finally:
         for child in children:
             if child.poll() is None:

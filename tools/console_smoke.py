@@ -84,6 +84,57 @@ def _probe(window) -> None:
     status = window.evaluate_js("document.querySelector('#status').textContent")
     check("状态徽标有文字", bool(status), str(status))
 
+    # A tray/global-hotkey update must leave existing controls and focus intact.
+    window.evaluate_js(
+        "window.__retainedSlider=document.querySelector('.field[data-group=vignette][data-field=strength] input');"
+        "window.__retainedSlider.focus(); document.querySelector('#controls').scrollTop=180;"
+        "window.__retainedScroll=document.querySelector('#controls').scrollTop;"
+    )
+    changed = api.patch({"vignette": {"strength": 0.61}, "stats": {"position": "top-right"}})
+    window.evaluate_js(f"renderState({json.dumps(changed)})")
+    check(
+        "外部配置同步保留滑块节点",
+        window.evaluate_js(
+            "window.__retainedSlider===document.querySelector('.field[data-group=vignette][data-field=strength] input')"
+        ),
+    )
+    check(
+        "外部配置同步保留焦点",
+        window.evaluate_js("document.activeElement===window.__retainedSlider"),
+    )
+    check(
+        "外部配置同步保留滚动位置",
+        window.evaluate_js(
+            "document.querySelector('#controls').scrollTop===window.__retainedScroll"
+        ),
+    )
+    check(
+        "外部配置同步更新下拉标签",
+        window.evaluate_js(
+            "document.querySelector('.field[data-group=stats][data-field=position] .select-trigger').textContent"
+        )
+        == "右上",
+    )
+    window.evaluate_js(
+        "document.activeElement.blur();document.querySelector('#controls').scrollTop=0"
+    )
+
+    # Canonical values returned by the backend must be reflected by the UI.
+    window.evaluate_js(
+        "setValue('vignette','inner',1.5);setValue('vignette','outer',.5);flushPatch()"
+    )
+    time.sleep(0.8)
+    radius_state = load(api._cfg_path).vignette
+    check(
+        "暗角交叉参数回写到面板",
+        window.evaluate_js(
+            "Number(document.querySelector('.field[data-group=vignette][data-field=inner] input').value)"
+        )
+        == radius_state.inner,
+    )
+    api.reset()
+    window.evaluate_js(f"renderState({json.dumps(api.state())})")
+
     triangle_group = bool(
         window.evaluate_js("document.querySelector('.group[data-group=triangles]')")
     )

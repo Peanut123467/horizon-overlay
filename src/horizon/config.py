@@ -6,12 +6,16 @@ Everything lives in ``%APPDATA%/horizon/config.json``. No network, no telemetry.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
+import shutil
 from dataclasses import asdict, dataclass, field, fields
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .hotkeys import DEFAULT_HOTKEYS, validate_bindings
 
@@ -210,13 +214,19 @@ def preset(name: str, base: HorizonConfig | None = None) -> HorizonConfig:
 
 def load(path: Path | None = None) -> HorizonConfig:
     p = path or config_path()
-    if not p.exists():
-        return default_config()
     try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        raw = json.loads(p.read_text(encoding="utf-8-sig"))
+        if not isinstance(raw, dict):
+            raise ValueError("configuration must be a JSON object")
+    except FileNotFoundError:
         return default_config()
-    if not isinstance(raw, dict):
+    except (ValueError, UnicodeError) as exc:
+        # Do not fall back until the original bytes are safe. Read and backup
+        # permission errors propagate so a caller cannot silently overwrite them.
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup = p.with_name(f"{p.name}.bak-{stamp}-{uuid4().hex[:8]}")
+        p.rename(backup)
+        logging.getLogger(__name__).warning("Invalid config (%s); preserved at %s", exc, backup)
         return default_config()
     return apply_patch(default_config(), raw)
 
@@ -224,10 +234,24 @@ def load(path: Path | None = None) -> HorizonConfig:
 def save(cfg: HorizonConfig, path: Path | None = None) -> Path:
     p = path or config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(cfg.to_dict(), indent=2, ensure_ascii=False)
+    if p.exists():
+        try:
+            if p.read_text(encoding="utf-8") == text:
+                return p
+        except UnicodeError:
+            pass  # keep invalid bytes in the backup before replacing them
+        shutil.copy2(p, p.with_name(p.name + ".bak"))
     tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cfg.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     tmp.replace(p)
     return p
+
+
+def normalize_vignette_radii(inner: float, outer: float) -> tuple[float, float]:
+    """Keep reversed or equal radii from disabling the gradient or making a hard edge."""
+    inner, outer = sorted((inner, outer))
+    return inner, max(outer, inner + 0.05)
 
 
 # ----------------------------------------------------------------- patching --
@@ -267,7 +291,16 @@ _HEX_RE = re.compile(r"^#?[0-9a-fA-F]{3}$|^#?[0-9a-fA-F]{6}$")
 def _coerce(section: str, name: str, value: Any, default: Any) -> Any:
     """Force ``value`` to the type of ``default``, then clamp it."""
     if isinstance(default, bool):
-        return bool(value)
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text in ("true", "1", "yes", "on"):
+                return True
+            if text in ("false", "0", "no", "off"):
+                return False
+            return default
+        if isinstance(value, (bool, int, float)) and value in (0, 1):
+            return bool(value)
+        return default
     if isinstance(default, int):
         try:
             out: float = int(round(float(value)))
@@ -325,9 +358,12 @@ def apply_patch(cfg: HorizonConfig, patch: dict[str, Any]) -> HorizonConfig:
                 obj, f.name, _coerce(section, f.name, getattr(obj, f.name), getattr(base, f.name))
             )
 
+    new.vignette.inner, new.vignette.outer = normalize_vignette_radii(
+        new.vignette.inner, new.vignette.outer
+    )
     new.monitor = max(0, _coerce("", "monitor", new.monitor, cfg.monitor))
-    new.start_hidden = bool(new.start_hidden)
-    new.tray_hint_shown = bool(new.tray_hint_shown)
+    new.start_hidden = _coerce("", "start_hidden", new.start_hidden, cfg.start_hidden)
+    new.tray_hint_shown = _coerce("", "tray_hint_shown", new.tray_hint_shown, cfg.tray_hint_shown)
 
     colour = str(new.color or "").strip()
     if _HEX_RE.match(colour):

@@ -233,6 +233,8 @@ user32.ReleaseDC.restype = ctypes.c_int
 
 user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
 user32.RegisterHotKey.restype = wintypes.BOOL
+user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.UnregisterHotKey.restype = wintypes.BOOL
 
 user32.SetTimer.argtypes = [wintypes.HWND, ctypes.c_size_t, wintypes.UINT, wintypes.LPVOID]
 user32.SetTimer.restype = ctypes.c_size_t
@@ -316,20 +318,23 @@ def set_dpi_aware() -> None:
 
 def list_monitors() -> list[tuple[int, int, int, int]]:
     """Return ``[(x, y, width, height), ...]`` in physical pixels, primary first."""
-    found: list[tuple[int, int, int, int]] = []
+    found: list[tuple[bool, tuple[int, int, int, int]]] = []
 
     def _cb(hmon, _hdc, _rect, _lparam):
         info = MONITORINFO()
         info.cbSize = ctypes.sizeof(MONITORINFO)
         if user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
             r = info.rcMonitor
-            found.append((r.left, r.top, r.right - r.left, r.bottom - r.top))
+            found.append(
+                (bool(info.dwFlags & 1), (r.left, r.top, r.right - r.left, r.bottom - r.top))
+            )
         return True
 
     user32.EnumDisplayMonitors(None, None, _MONITORENUMPROC(_cb), 0)
     if not found:  # pragma: no cover - defensive
-        found.append((0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)))
-    return found
+        return [(0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))]
+    found.sort(key=lambda item: (not item[0], item[1][0], item[1][1]))
+    return [rect for _primary, rect in found]
 
 
 class LayeredSurface:

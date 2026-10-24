@@ -1,12 +1,14 @@
 # Horizon
 
+[简体中文](README.md) · [English](README.en.md) · [日本語](README.ja.md)
+
 **为在 3D 游戏中容易产生眩晕感的玩家而做**——在游戏画面上叠加一层可点击穿透的静态遮罩：用暗角收窄周边视野，用固定边框和中心锚点给眼睛一个不动的参照物
 
 **[下载 Horizon.exe](https://github.com/Peanut123467/horizon-overlay/releases/latest)** · Windows 10 / 11 · 免安装 · Apache-2.0
 
 双击打开本地控制面板，点击“启动叠加层”后启用屏幕遮罩；运行时也可通过右下角托盘操作。详见 [控制面板使用说明](docs/控制面板.md)。
 
-**v0.2.1**：新增可调的四边三角效果，支持空心与实心；拖动滑块时可连续查看预览和实际叠加层的变化。详见 [更新说明](CHANGELOG.md)。
+**v0.2.2**：修复暗角参数、配置保护、多屏指标与面板同步问题，减少暗角缓存占用，并新增英文、日文说明。详见 [更新说明](CHANGELOG.md)。
 
 ![对比预览](docs/compare-standard.png)
 
@@ -49,7 +51,7 @@
 3. **双击 `Horizon.exe`**；
 4. 控制面板打开后，点击右上角“启动叠加层”；托盘出现图标，屏幕上出现暗角与边框
 
-首次启动需要 1–3 秒（单文件 exe 要先解压到临时目录），之后常驻内存约 70MB
+首次启动需要几秒解压单文件 exe；启动时间和内存占用取决于机器、分辨率及控制面板是否打开。
 
 > **杀毒软件报毒怎么办**
 >   
@@ -61,7 +63,7 @@
 
 ```bat
 git clone https://github.com/Peanut123467/horizon-overlay.git horizon-overlay
-cd horizon
+cd horizon-overlay
 
 python -m venv .venv
 .venv\Scripts\activate
@@ -90,6 +92,7 @@ horizon --self-test
 | --------------------- | -------------------------------------------------------------------------------------------- |
 | `'horizon' 不是内部或外部命令` | 虚拟环境没激活（先跑 `.venv\Scripts\activate`），或 Python 的 `Scripts` 目录不在 PATH                          |
 | 双击 exe 后毫无反应          | 看日志：`%APPDATA%\horizon\horizon.log`                                                          |
+| 控制面板黑屏 | 更新 WebView2 和显卡驱动；仍有问题时，在 PowerShell 中执行 `$env:HORIZON_WEBVIEW_ARGS='--in-process-gpu'`，再从同一窗口启动程序。此兼容选项默认不启用 |
 | 托盘里找不到图标              | Windows 11 默认把新图标折叠进 `^` 溢出区。点开 `^` 把 Horizon 拖到任务栏；或 设置 → 个性化 → 任务栏 → 其他系统托盘图标 → 打开 Horizon |
 | 屏幕上什么都没有              | 游戏在独占全屏模式；改成「无边框窗口」                                                                          |
 | 提示权限错误                | 不需要管理员权限，普通用户运行即可                                                                            |
@@ -151,7 +154,8 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
 | **显示元素** ▸       | 边框、中心准星、锚点阵、统计面板，四项独立勾选               |
 | **重新载入配置**       | 改完 `config.json` 后不用重启，点这个立即生效        |
 | **打开配置文件夹**      | 直接打开 `%APPDATA%\horizon\`             |
-| `Horizon v0.2.1` | 版本号，不可点击                              |
+| **打开控制面板** | 打开或激活本地参数面板 |
+| `Horizon v0.2.2` | 版本号，不可点击                              |
 | **退出**           | 关闭程序并保存当前设置                           |
 
 所有改动**即时生效并写回 `config.json`**，不用重启。菜单里的圆点和勾选状态实时反映当前配置——用热键改过之后，再打开菜单也是对的
@@ -209,10 +213,13 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
 
 路径：`%APPDATA%\horizon\config.json`（首次运行自动生成）。
 
-```jsonc
+配置使用严格 JSON，不支持注释或尾逗号。解析失败时，原文件先保留为 `config.json.bak-<时间戳>-<标识>`，再采用默认设置；正常保存时，上一版保留为 `config.json.bak`。读取或备份失败会报错并停止覆盖。
+
+```json
 {
   "vignette": { "enabled": true, "inner": 0.34, "outer": 1.06, "strength": 0.55 },
   "frame":    { "enabled": true, "inset": 26, "width": 8, "alpha": 90 },
+  "triangles": { "enabled": false, "filled": false, "base": 50, "depth": 20, "width": 3, "alpha": 153 },
   "reticle":  { "enabled": true, "size": 9, "gap": 9, "alpha": 150 },
   "grid":     { "enabled": false, "spacing": 180, "radius": 2, "alpha": 16 },
   "session":  { "enabled": true, "minutes": 60, "reminder_seconds": 3 },
@@ -227,7 +234,7 @@ Windows 11 默认把新出现的托盘图标塞进溢出区，所以第一次启
 | ---------------------------------------------- | --------------------------------------------------------------------- |
 | `color`                                        | 强调色，`#RRGGBB` 或 `#RGB`。作用于边框、准星、点阵和统计文字。**不影响暗角**——暗角是压暗遮罩，染色会让整个画面偏色 |
 | `vignette.inner`                               | 暗角起始半径（0 = 从屏幕中心就开始压暗，1 = 到边角才压暗）                                     |
-| `vignette.outer`                               | 达到最大强度的半径                                                             |
+| `vignette.outer`                               | 达到最大强度的半径；半径倒置时会排序，过渡宽度至少 0.05，面板会联动限制滑块范围 |
 | `vignette.strength`                            | 最大不透明度（0–1）                                                           |
 | `frame.inset`                                  | 边框距屏幕边缘的像素数                                                           |
 | `frame.width`                                  | 边框粗细（像素）                                                              |
@@ -272,10 +279,10 @@ horizon --preview docs/my.png --color "#FFD60A"   # 先看一眼再决定
 
 | 指标      | 含义                                                     |
 | ------- | ------------------------------------------------------ |
-| `275Hz` | 当前显示器刷新率（`GetDeviceCaps(VREFRESH)`；读到 0/1 时该项直接不显示，不猜） |
+| `275Hz` | 叠加层所在显示器的刷新率（按显示器设备创建 DC 后读取 `VREFRESH`；失败或读到 0/1 时不显示） |
 | `内存`    | **本程序自身**的工作集                                          |
 | `系统`    | 物理内存占用率                                                |
-| `重绘`    | 上一次全屏合成的耗时，只在切换预设/颜色时发生                                |
+| `重绘`    | 上一次全屏合成的耗时，外观参数、分辨率或提示文字变化时更新 |
 
 ### 关于「游戏 FPS」——为什么这里没有
 
@@ -285,7 +292,7 @@ horizon --preview docs/my.png --color "#FFD60A"   # 先看一眼再决定
 - 系统级唯一合规路径是 **ETW**（Intel PresentMon 走的路），需要实现 ETW 消费者并解析 DXGI 事件，属于独立工作量；
 - 用轮询或桌面合成频率估算都不等于游戏 FPS，会给出误导性数字，所以宁可不显示
 
-`重绘 141ms` 只在切换预设或颜色时触发一次，平时完全不重绘。这也是为什么统计面板单独占一个小窗口——全屏每秒重绘一次要吃掉约 10% 的 CPU
+全屏只在可见外观、分辨率或提示文字变化时重绘，滑块拖动会持续触发变化；相同内容会去重。统计面板使用独立的小窗口，定时更新数字不会触发全屏合成。耗时示例不代表其他机器的性能。
 
 ---
 
@@ -305,6 +312,8 @@ horizon --duration 5 --no-tray            # 5 秒后自动退出，冒烟测试�
 horizon --config my.json                  # 用指定的配置文件，不动默认配置
 horizon --version                         # 打印版本号
 ```
+
+`--preset`、`--color`、`--monitor`、`--no-stats` 会启用临时会话，该次运行中的改动不写回配置。需要长期保存时，请正常打开控制面板修改设置。
 
 ---
 
@@ -333,8 +342,8 @@ horizon --version                         # 打印版本号
 | HDR 游戏        | 叠加层按 SDR 混合，颜色可能有偏差                                |
 | 多显示器          | 一次只覆盖一个显示器（`monitor` 字段）                           |
 | 反作弊           | 不注入，但第三方置顶窗口仍可能被个别反作弊拦截或标记；**竞技联机请勿使用**            |
-| 切换预设时有一次卡顿    | 全屏重绘 1080p 约 60ms、1440p 约 140ms，仅在切换预设/颜色/分辨率时发生一次 |
-| 内存占用          | Python + numpy + Pillow，常驻约 60–80MB，比原生 C++ 工具大    |
+| 全屏合成有开销 | 参数、分辨率及提示变化会重绘，耗时取决于硬件和分辨率；4K 比 1080p 开销更大，请参考 HUD 的实测值 |
+| 内存占用 | Python、numpy、Pillow 及 WebView2 都有开销。暗角只缓存最近一张遮罩，4K 为约 7.9 MiB；这不含临时数组、窗口表面或控制面板进程 |
 | exe 冷启动 1–3 秒 | 单文件 exe 每次启动要解压到临时目录；源码运行没有这个问题                    |
 | 无游戏 FPS       | 见上文「关于游戏 FPS」，不注入就拿不到                              |
 | 游戏重设 z 序      | 已用 2 秒一次的看门狗重新置顶；极少数游戏可能仍然抢焦点                      |
@@ -347,7 +356,10 @@ horizon --version                         # 打印版本号
 pip install -e ".[dev]"
 pytest -q
 ruff check src tests && ruff format --check src tests
+node --test tests/live_updates.test.cjs
 ```
+
+GitHub Actions 在 Windows 和 Linux 上检查 Python 3.10 / 3.12。Windows 跑完整单元测试；Linux 跑纯配置、快捷键校验与渲染测试，并跳过依赖 Win32 的测试。图形程序仍只支持 Windows。
 
 
 ```
@@ -369,7 +381,7 @@ assets/
 三个关键约束：
 
 1. `render.compose()` 输出的是**预乘 alpha 的 BGRA**，这是 `UpdateLayeredWindow` 的要求；顺序错了会得到灰边
-2. **主叠加层和统计面板是两个独立窗口**。全屏合成 1440p 要 140ms 左右，若每秒为刷新一个内存数字而重绘全屏，会稳定吃掉约 10% 的 CPU；HUD 单独一个约 250×30 的窗口，刷新成本低三个数量级
+2. **主叠加层和统计面板是两个独立窗口**。HUD 仅更新一个小表面，避免每次刷新内存数字时重新合成整屏；尺寸与耗时取决于文字、字体和机器。
 3. **无控制台运行时 `sys.stdout` 是 `None`**，裸 `print` 会抛异常。日志统一走 `_make_logger()`，无控制台时写 `%APPDATA%\horizon\horizon.log`
 
 重新打包 exe：
@@ -383,7 +395,7 @@ python tools/build_exe.py
 ## 十六、路线图
 
 - [ ] **游戏 FPS（ETW）** —— 唯一不注入的可行路径：实现 ETW 实时消费者，订阅 `Microsoft-Windows-DXGI` / D3D9 Present 事件，等价于 Intel PresentMon 的做法。工作量大，但能给出真实帧率与帧时间 P99
-- [ ] 托盘菜单里加「开机自启」开关（现在要手动把快捷方式放进 `shell:startup`）
+- [ ] 托盘菜单里加「开机自启」开关（目前已可通过控制面板设置）
 - [ ] 配置热重载（`ReadDirectoryChangesW`，现在要点托盘菜单手动重载）
 - [ ] 按前台窗口标题自动切换预设（仅读窗口标题，不碰进程；**待验证**是否会被个别反作弊关注）
 - [ ] 更多遮罩形状：上下条带、椭圆、可调中心偏移
@@ -400,36 +412,6 @@ Apache-2.0，见 [LICENSE](LICENSE)
 
 ---
 
-## English summary
+## Other languages
 
-**Horizon** is a small Windows-only overlay for players who get motion discomfort in 3D games. It draws a static, click-through vignette plus a fixed border and centre anchor on top of the screen, narrowing peripheral optic flow and giving the eye a reference that does not move with the camera. It lives in the system tray — right-click the icon to quit, left-click to toggle.
-
-### Install
-
-**Option A — prebuilt exe (no Python needed):** download `Horizon.exe` from Releases, put it anywhere, double-click it. First launch takes 1–3 s while the one-file bundle unpacks. Windows Defender / antivirus heuristics sometimes flag PyInstaller bootloaders; that is a known false positive, not behaviour of this project.
-
-**Option B — from source:**
-
-```bat
-git clone https://github.com/Peanut123467/horizon-overlay.git horizon-overlay
-cd horizon
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-horizonw
-```
-
-`horizonw` runs without a console window (tray only); `horizon` keeps a console so you can watch the log. Verify with `horizon --self-test`.
-
-### Use
-
-1. Launch it — a green ring icon appears in the notification area and the vignette/border shows on screen.
-2. Set the game to **borderless windowed** (exclusive fullscreen will not show overlays).
-3. Adjust with `Ctrl+Alt+1/2/3` (presets), `Ctrl+Alt+H` (toggle), `Ctrl+Alt+C` (colour).
-4. **Quit via right-click on the tray icon → 退出.** This saves your settings; killing the process does not.
-
-The accent colour is configurable (default bright green `#00FF66`), and a small HUD shows the display refresh rate, this process's memory, system memory load, and the cost of the last full recomposition. There is deliberately **no game-FPS readout**: without injecting into the game or implementing an ETW consumer, that number cannot be obtained honestly.
-
-It does **not** inject into the game, read or write game files, or phone home. It is **not** a medical device and makes **no efficacy claims**.
-
-Built with Python, `ctypes` (Win32 layered window), numpy and Pillow. Licensed Apache-2.0.
+完整使用说明：[English](README.en.md) · [日本語](README.ja.md)。

@@ -161,7 +161,10 @@ function decorateSelects(controls) {
     function updateLabel() {
       valueText.textContent = select.selectedOptions[0]?.textContent || "请选择";
       trigger.setAttribute("aria-label", `${label?.textContent || "选项"}：${valueText.textContent}`);
+      menu?.querySelectorAll(".select-option").forEach((option, index) =>
+        option.setAttribute("aria-selected", String(index === select.selectedIndex)));
     }
+    select.syncLabel = updateLabel;
     updateLabel();
     select.addEventListener("change", updateLabel);
 
@@ -286,13 +289,13 @@ const $ = (sel) => document.querySelector(sel);
 
 /* ------------------------------------------------------------ utilities */
 
-function setStatus(alive) {
+function setStatus(alive, temporary = false) {
   const badge = $("#status");
   const startBtn = $("#btn-start");
   $("#btn-stop").hidden = !alive;
   $("#btn-toggle").hidden = !alive;
   if (alive) {
-    badge.textContent = "叠加层运行中";
+    badge.textContent = temporary ? "叠加层运行中 · 临时会话" : "叠加层运行中";
     badge.className = "badge badge-ok";
     startBtn.hidden = true;
   } else {
@@ -300,6 +303,7 @@ function setStatus(alive) {
     badge.className = "badge badge-warn";
     startBtn.hidden = false;
   }
+  $("#session-note").hidden = !alive || !temporary;
 }
 
 function formatValue(value, field) {
@@ -342,8 +346,10 @@ function flushPatch() {
       const body = Object.assign({}, pendingPatch);
       for (const key of Object.keys(pendingPatch)) delete pendingPatch[key];
       await enqueue(async () => {
+        const revision = editRevision;
         const state = await api.patch(body);
-        setStatus(state.overlay_alive);
+        setStatus(state.overlay_alive, state.temporary_session);
+        if (revision === editRevision && !Object.keys(pendingPatch).length) renderState(state);
       });
     }
   })().finally(() => {
@@ -402,6 +408,7 @@ function setValue(group, name, value) {
   if (group) cfg[group][name] = value;
   else cfg[name] = value;
   if (group === "triangles") refreshDisabled();
+  if (group === "vignette") refreshVignetteLimits();
   queuePatch(group ? { [group]: { [name]: value } } : { [name]: value });
   queuePreview();
 }
@@ -558,16 +565,17 @@ function markActivePreset() {
 
 function renderSwatches() {
   const box = $("#swatches");
-  box.innerHTML = "";
-  for (const hex of PALETTE) {
-    const btn = document.createElement("button");
-    btn.className = "swatch";
-    btn.style.background = hex;
-    btn.title = hex;
-    if (cfg.color.toUpperCase() === hex.toUpperCase()) btn.classList.add("active");
-    btn.addEventListener("click", () => applyColour(hex));
-    box.appendChild(btn);
+  if (!box.children.length) {
+    for (const hex of PALETTE) {
+      const btn = document.createElement("button");
+      btn.className = "swatch";
+      btn.style.background = hex;
+      btn.title = hex;
+      btn.addEventListener("click", () => applyColour(hex));
+      box.appendChild(btn);
+    }
   }
+  for (const btn of box.children) btn.classList.toggle("active", cfg.color.toUpperCase() === btn.title.toUpperCase());
   $("#colour-input").value = cfg.color;
   $("#colour-label").textContent = cfg.color;
 }
@@ -582,22 +590,49 @@ function applyColour(hex) {
 /* -------------------------------------------------------------------- boot */
 
 function renderState(state) {
-  if (activeSelect) activeSelect.close(false);
   cfg = state.config;
   setAccent(cfg.color);
-  setStatus(state.overlay_alive);
+  setStatus(state.overlay_alive, state.temporary_session);
   const controls = $("#controls");
-  controls.innerHTML = "";
-  for (const group of SCHEMA) controls.appendChild(makeGroup(group));
-  if (monitors.length) controls.appendChild(makeMonitorGroup(monitors));
-  controls.appendChild(makeHotkeyGroup());
-  decorateDrawers(controls);
-  decorateSelects(controls);
+  if (!controls.children.length) {
+    for (const group of SCHEMA) controls.appendChild(makeGroup(group));
+    if (monitors.length) controls.appendChild(makeMonitorGroup(monitors));
+    controls.appendChild(makeHotkeyGroup());
+    decorateDrawers(controls);
+    decorateSelects(controls);
+  }
+  refreshVignetteLimits();
+  for (const group of SCHEMA) {
+    const section = controls.querySelector(`.group[data-group="${group.key}"]`);
+    const toggle = section.querySelector(".switch");
+    if (toggle) toggle.checked = cfg[group.key].enabled;
+    for (const field of group.fields) {
+      if (field.name === "enabled") continue;
+      const row = section.querySelector(`.field[data-field="${field.name}"]`);
+      const input = row.querySelector("input,select");
+      input.value = String(cfg[group.key][field.name]);
+      input.syncLabel?.();
+      const output = row.querySelector("output");
+      if (output) output.textContent = formatValue(input.value, field);
+    }
+  }
+  const monitor = controls.querySelector('.group[data-group="display"] select');
+  if (monitor) { monitor.value = String(cfg.monitor); monitor.syncLabel?.(); }
+  for (const button of controls.querySelectorAll(".hotkey-row button")) {
+    if (button.dataset.recording !== "true") button.textContent = cfg.hotkeys[button.dataset.action];
+  }
   refreshDisabled();
   renderSwatches();
   $("#start-hidden").checked = cfg.start_hidden;
   markActivePreset();
   queuePreview();
+}
+
+function refreshVignetteLimits() {
+  const inner = document.querySelector('.field[data-group="vignette"][data-field="inner"] input');
+  const outer = document.querySelector('.field[data-group="vignette"][data-field="outer"] input');
+  if (inner) inner.max = Math.max(0, Math.min(2, cfg.vignette.outer - 0.05)).toFixed(2);
+  if (outer) outer.min = Math.min(3, cfg.vignette.inner + 0.05).toFixed(2);
 }
 
 function decorateDrawers(controls) {
@@ -693,7 +728,8 @@ function bindAction(selector, work) {
 }
 
 function isEditingConfig() {
-  return patchFlight !== null || Object.keys(pendingPatch).length > 0 ||
+  return activeSelect !== null || !!document.querySelector('[data-recording="true"]') ||
+    patchFlight !== null || Object.keys(pendingPatch).length > 0 ||
     (document.hasFocus() && /^(INPUT|SELECT)$/.test(document.activeElement?.tagName || ""));
 }
 
@@ -725,15 +761,18 @@ async function boot() {
     });
     bindAction("#btn-start", async () => {
       const state = await api.start_overlay();
-      setStatus(state.overlay_alive);
+      setStatus(state.overlay_alive, state.temporary_session);
       if (!state.overlay_alive) throw new Error("叠加层启动失败，请检查日志后重试");
     });
     bindAction("#btn-stop", async () => {
       const state = await api.stop_overlay();
-      setStatus(state.overlay_alive);
+      setStatus(state.overlay_alive, state.temporary_session);
       if (state.overlay_alive) throw new Error("叠加层尚未停止，请稍后重试");
     });
-    bindAction("#btn-toggle", async () => setStatus((await api.toggle_overlay()).overlay_alive));
+    bindAction("#btn-toggle", async () => {
+      const state = await api.toggle_overlay();
+      setStatus(state.overlay_alive, state.temporary_session);
+    });
     bindAction("#btn-import", async () => {
       const state = await api.import_config();
       if (state) { renderState(state); notify("配置已导入"); }
@@ -754,7 +793,7 @@ async function boot() {
           // Input may start while the queued request is waiting or in flight.
           if (isEditingConfig() || revision !== editRevision ||
               requestedConfig !== JSON.stringify(cfg)) return;
-          setStatus(state.overlay_alive);
+          setStatus(state.overlay_alive, state.temporary_session);
           if (JSON.stringify(state.config) !== requestedConfig) renderState(state);
         });
       } catch (err) { showError(err); }
