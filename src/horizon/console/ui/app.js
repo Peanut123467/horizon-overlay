@@ -34,6 +34,19 @@ const SCHEMA = [
     ],
   },
   {
+    key: "triangles",
+    label: "四边三角",
+    desc: "四边固定的 V 形参照，大小统一调节，颜色跟随全局设置",
+    fields: [
+      { name: "enabled", type: "switch", label: "启用" },
+      { name: "filled", label: "样式", type: "select", boolean: true, options: [["false", "空心"], ["true", "实心"]] },
+      { name: "base", label: "底边宽度", type: "range", min: 1, max: 100, step: 1, unit: "%" },
+      { name: "depth", label: "伸入深度", type: "range", min: 1, max: 100, step: 1, unit: "%" },
+      { name: "width", label: "空心线宽", type: "range", min: 1, max: 60, step: 1, unit: "px" },
+      { name: "alpha", label: "不透明度", type: "range", min: 0, max: 255, step: 1, percentOf: 255 },
+    ],
+  },
+  {
     key: "reticle",
     label: "中心准星",
     desc: "屏幕正中的四个短刻度，给眼睛一个锚点",
@@ -93,10 +106,13 @@ let api = null;
 let cfg = null;
 let patchTimer = null;
 let previewTimer = null;
+let patchFlight = null;
+let previewInFlight = false;
+let previewPending = false;
+let editRevision = 0;
 let monitors = [];
 let hotkeyLabels = {};
 let serial = Promise.resolve();
-let previewVersion = 0;
 const pendingPatch = {};
 const drawerStates = new Map();
 let activeSelect = null;
@@ -288,6 +304,7 @@ function setStatus(alive) {
 
 function formatValue(value, field) {
   const num = Number(value);
+  if (field.percentOf) return `${Math.round(num / field.percentOf * 100)}%`;
   const text = Number.isInteger(num) ? String(num) : num.toFixed(2);
   return field.unit ? text + field.unit : text;
 }
@@ -306,19 +323,34 @@ function queuePatch(patch) {
       pendingPatch[key] = value;
     }
   }
-  clearTimeout(patchTimer);
-  patchTimer = setTimeout(flushPatch, 140);
+  if (patchTimer === null && !patchFlight) {
+    patchTimer = setTimeout(() => {
+      patchTimer = null;
+      // enqueue reports API errors; consume the timer callback's rejection.
+      flushPatch().catch(() => {});
+    }, 50);
+  }
 }
 
-async function flushPatch() {
+function flushPatch() {
   clearTimeout(patchTimer);
-  const body = Object.assign({}, pendingPatch);
-  for (const key of Object.keys(pendingPatch)) delete pendingPatch[key];
-  if (!Object.keys(body).length) return serial;
-  return enqueue(async () => {
-    const state = await api.patch(body);
-    setStatus(state.overlay_alive);
+  patchTimer = null;
+  if (patchFlight) return patchFlight;
+  if (!Object.keys(pendingPatch).length) return serial;
+  patchFlight = (async () => {
+    while (Object.keys(pendingPatch).length) {
+      const body = Object.assign({}, pendingPatch);
+      for (const key of Object.keys(pendingPatch)) delete pendingPatch[key];
+      await enqueue(async () => {
+        const state = await api.patch(body);
+        setStatus(state.overlay_alive);
+      });
+    }
+  })().finally(() => {
+    patchFlight = null;
+    if (Object.keys(pendingPatch).length) queuePatch({});
   });
+  return patchFlight;
 }
 
 function enqueue(work) {
@@ -342,22 +374,34 @@ function notify(text) {
 }
 
 function queuePreview() {
-  const version = ++previewVersion;
-  clearTimeout(previewTimer);
-  previewTimer = setTimeout(async () => {
-    try {
-      const src = await api.preview(cfg);
-      if (version === previewVersion) $("#preview").src = src;
-    } catch (err) {
-      showError(err);
-    }
-  }, 160);
+  previewPending = true;
+  if (!previewInFlight && previewTimer === null) {
+    previewTimer = setTimeout(refreshPreview, 33);
+  }
+}
+
+async function refreshPreview() {
+  previewTimer = null;
+  previewPending = false;
+  previewInFlight = true;
+  try {
+    const src = await api.preview(cfg);
+    // Display intermediate frames too: continuous input must not starve painting.
+    $("#preview").src = src;
+  } catch (err) {
+    showError(err);
+  } finally {
+    previewInFlight = false;
+    if (previewPending) queuePreview();
+  }
 }
 
 function setValue(group, name, value) {
+  editRevision++;
   markActivePreset();
   if (group) cfg[group][name] = value;
   else cfg[name] = value;
+  if (group === "triangles") refreshDisabled();
   queuePatch(group ? { [group]: { [name]: value } } : { [name]: value });
   queuePreview();
 }
@@ -394,7 +438,9 @@ function makeField(group, field) {
       select.appendChild(option);
     }
     select.value = cfg[group.key][field.name];
-    select.addEventListener("change", () => setValue(group.key, field.name, select.value));
+    select.addEventListener("change", () => setValue(
+      group.key, field.name, field.boolean ? select.value === "true" : select.value
+    ));
     row.appendChild(select);
 
     const spacer = document.createElement("span");
@@ -499,8 +545,9 @@ function refreshDisabled() {
     if (!el) continue;
     const on = cfg[group.key].enabled;
     for (const row of el.querySelectorAll(".field")) {
-      row.classList.toggle("disabled", !on);
-      row.querySelectorAll("input,select,button").forEach((input) => { input.disabled = !on; });
+      const disabled = !on || (group.key === "triangles" && row.dataset.field === "width" && cfg.triangles.filled);
+      row.classList.toggle("disabled", disabled);
+      row.querySelectorAll("input,select,button").forEach((input) => { input.disabled = disabled; });
     }
   }
 }
@@ -645,6 +692,11 @@ function bindAction(selector, work) {
   });
 }
 
+function isEditingConfig() {
+  return patchFlight !== null || Object.keys(pendingPatch).length > 0 ||
+    (document.hasFocus() && /^(INPUT|SELECT)$/.test(document.activeElement?.tagName || ""));
+}
+
 async function boot() {
   try {
     api = window.pywebview.api;
@@ -692,13 +744,18 @@ async function boot() {
     });
     // Refresh changes made using the tray or global shortcuts without moving a slider under the cursor.
     setInterval(async () => {
-      if (Object.keys(pendingPatch).length || document.hasFocus() &&
-          /^(INPUT|SELECT)$/.test(document.activeElement.tagName)) return;
+      if (isEditingConfig()) return;
       try {
         await enqueue(async () => {
+          if (isEditingConfig()) return;
+          const revision = editRevision;
+          const requestedConfig = JSON.stringify(cfg);
           const state = await api.state();
+          // Input may start while the queued request is waiting or in flight.
+          if (isEditingConfig() || revision !== editRevision ||
+              requestedConfig !== JSON.stringify(cfg)) return;
           setStatus(state.overlay_alive);
-          if (JSON.stringify(state.config) !== JSON.stringify(cfg)) renderState(state);
+          if (JSON.stringify(state.config) !== requestedConfig) renderState(state);
         });
       } catch (err) { showError(err); }
     }, 2000);

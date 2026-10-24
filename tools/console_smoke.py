@@ -84,6 +84,87 @@ def _probe(window) -> None:
     status = window.evaluate_js("document.querySelector('#status').textContent")
     check("状态徽标有文字", bool(status), str(status))
 
+    triangle_group = bool(
+        window.evaluate_js("document.querySelector('.group[data-group=triangles]')")
+    )
+    check("四边三角独立参数组存在", triangle_group)
+    if triangle_group:
+        original_preview = window.evaluate_js("document.querySelector('#preview').src")
+        window.evaluate_js(
+            "document.querySelector('.group[data-group=triangles] .switch').click();"
+            "for (const [name,value] of Object.entries({base:65,depth:27,width:8,alpha:102})) {"
+            " const i=document.querySelector('.field[data-group=triangles][data-field='+name+'] input');"
+            " i.value=value; i.dispatchEvent(new Event('input',{bubbles:true})); }"
+        )
+        time.sleep(0.8)
+        saved_triangles = load(api._cfg_path).triangles
+        check(
+            "三角形尺寸线宽透明度分别保存",
+            (
+                saved_triangles.enabled
+                and saved_triangles.base == 65
+                and saved_triangles.depth == 27
+                and saved_triangles.width == 8
+                and saved_triangles.alpha == 102
+            ),
+        )
+        check(
+            "三角形预览随参数变化",
+            window.evaluate_js("document.querySelector('#preview').src") != original_preview,
+        )
+        check(
+            "三角形不透明度显示为百分比",
+            window.evaluate_js(
+                "document.querySelector('.field[data-group=triangles][data-field=alpha] output').textContent"
+            )
+            == "40%",
+        )
+        window.evaluate_js(
+            "(() => { const m=document.querySelector('.field[data-group=triangles][data-field=filled] select');"
+            "m.value='true'; m.dispatchEvent(new Event('change',{bubbles:true})); })()"
+        )
+        time.sleep(0.8)
+        check("实心模式保存为布尔值", load(api._cfg_path).triangles.filled is True)
+        check(
+            "实心模式停用线宽并保留数值",
+            bool(
+                window.evaluate_js(
+                    "document.querySelector('.field[data-group=triangles][data-field=width] input').disabled"
+                )
+            )
+            and load(api._cfg_path).triangles.width == 8,
+        )
+        window.evaluate_js(
+            "(() => { const m=document.querySelector('.field[data-group=triangles][data-field=filled] select');"
+            "m.value='false'; m.dispatchEvent(new Event('change',{bubbles:true})); })()"
+        )
+        time.sleep(0.8)
+        check(
+            "回到空心模式恢复线宽调节",
+            not window.evaluate_js(
+                "document.querySelector('.field[data-group=triangles][data-field=width] input').disabled"
+            )
+            and load(api._cfg_path).triangles.width == 8
+            and load(api._cfg_path).triangles.alpha == 102,
+        )
+        window.evaluate_js("document.querySelector('.btn-preset[data-preset=strong]').click()")
+        time.sleep(0.8)
+        check("切换预设保留三角形参数", load(api._cfg_path).triangles == saved_triangles)
+        window.evaluate_js("document.querySelector('#btn-reset').click()")
+        time.sleep(0.8)
+        check(
+            "恢复默认关闭三角形并恢复参数",
+            load(api._cfg_path).to_dict()["triangles"]
+            == {
+                "enabled": False,
+                "filled": False,
+                "base": 50.0,
+                "depth": 20.0,
+                "width": 3,
+                "alpha": 153,
+            },
+        )
+
     swatches = window.evaluate_js("document.querySelectorAll('.swatch').length")
     check("调色板有 5 个色块", swatches == 5, f"色块数={swatches}")
 
@@ -103,6 +184,31 @@ def _probe(window) -> None:
         bounds["width"] >= 50 and bounds["right"] <= bounds["limit"],
         str(bounds),
     )
+
+    # Continuous input must update both the preview and saved state BEFORE release.
+    before_drag = load(api._cfg_path).vignette.strength
+    window.evaluate_js(
+        "window.__dragProbe={frames:0,events:0,active:true};"
+        "window.__dragObserver=new MutationObserver(ms=>{window.__dragProbe.frames+=ms.filter(m=>m.attributeName==='src').length});"
+        "window.__dragObserver.observe(document.querySelector('#preview'),{attributes:true});"
+        "window.__dragTimer=setInterval(()=>{const p=window.__dragProbe; p.events++;"
+        "const i=document.querySelector('.field[data-group=vignette][data-field=strength] input');"
+        "i.value=.20+(p.events%50)*.01; i.dispatchEvent(new Event('input',{bubbles:true}));},25);"
+        "setTimeout(()=>{clearInterval(window.__dragTimer); window.__dragProbe.active=false;},1600);"
+    )
+    time.sleep(0.8)
+    during_drag = window.evaluate_js("window.__dragProbe")
+    check(
+        "持续拖动未结束时预览连续变化",
+        during_drag["active"] and during_drag["events"] > 2 and during_drag["frames"] >= 2,
+        str(during_drag),
+    )
+    check(
+        "持续拖动未结束时参数已发送保存",
+        load(api._cfg_path).vignette.strength != before_drag,
+    )
+    wait_for(window, "!window.__dragProbe.active")
+    window.evaluate_js("window.__dragObserver.disconnect()")
 
     # -- change a slider and confirm it reaches the config on disk -----------
     window.evaluate_js(

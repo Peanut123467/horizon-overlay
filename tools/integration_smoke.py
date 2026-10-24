@@ -39,6 +39,36 @@ def main():
         saved = load(api._cfg_path)
         assert saved.frame.width == 14 and saved.vignette.strength == 0.81
         print("PASS sequential IPC changes preserved on disk", flush=True)
+        triangles = {
+            "enabled": True,
+            "filled": False,
+            "base": 65.0,
+            "depth": 27.0,
+            "width": 8,
+            "alpha": 102,
+        }
+        api.patch({"triangles": triangles})
+        assert load(api._cfg_path).to_dict()["triangles"] == triangles
+        api.patch({"triangles": {"filled": True}})
+        assert load(api._cfg_path).triangles.filled
+        assert load(api._cfg_path).triangles.width == 8
+        from horizon.overlay import APP_SET, SET_TRIANGLES
+        from horizon.win32 import post_app_message
+
+        post_app_message(ipc.find_overlay(), APP_SET, SET_TRIANGLES, 0)
+        import time
+
+        deadline = time.monotonic() + 5
+        while load(api._cfg_path).triangles.enabled and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not load(api._cfg_path).triangles.enabled
+        post_app_message(ipc.find_overlay(), APP_SET, SET_TRIANGLES, 1)
+        deadline = time.monotonic() + 5
+        while not load(api._cfg_path).triangles.enabled and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert load(api._cfg_path).triangles.enabled
+        saved_triangles = load(api._cfg_path).triangles
+        print("PASS triangle IPC modes and tray toggle channel", flush=True)
         subprocess.run(
             launcher.command("--overlay", "--config", str(api._cfg_path), "--color", "#FF0000"),
             check=True,
@@ -51,6 +81,7 @@ def main():
         assert load(api._cfg_path).vignette.strength == 0.78
         api.preset("standard")
         assert load(api._cfg_path).vignette.strength == 0.55
+        assert load(api._cfg_path).triangles == saved_triangles
         print("PASS live presets restored defaults", flush=True)
         api.patch({"hotkeys": {"toggle": "Ctrl+Alt+Shift+F6"}})
         assert load(api._cfg_path).hotkeys["toggle"] == "Ctrl+Alt+Shift+F6"

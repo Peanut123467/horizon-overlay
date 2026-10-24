@@ -104,6 +104,29 @@ def _draw_reticle(draw: ImageDraw.ImageDraw, w: int, h: int, cfg: HorizonConfig,
     draw.ellipse((cx - 1, cy - 1, cx + 1, cy + 1), fill=colour)
 
 
+def _draw_triangles(draw: ImageDraw.ImageDraw, w: int, h: int, cfg: HorizonConfig, rgb) -> None:
+    t = cfg.triangles
+    right, bottom = w - 1, h - 1
+    cx, cy = right / 2, bottom / 2
+    half_x = right * max(1.0, min(100.0, t.base)) / 200
+    half_y = bottom * max(1.0, min(100.0, t.base)) / 200
+    dx = right * max(1.0, min(100.0, t.depth)) / 100
+    dy = bottom * max(1.0, min(100.0, t.depth)) / 100
+    colour = (*rgb, max(0, min(255, t.alpha)))
+    paths = (
+        ((cx - half_x, 0), (cx, dy), (cx + half_x, 0)),
+        ((cx - half_x, bottom), (cx, bottom - dy), (cx + half_x, bottom)),
+        ((0, cy - half_y), (dx, cy), (0, cy + half_y)),
+        ((right, cy - half_y), (right - dx, cy), (right, cy + half_y)),
+    )
+    for points in paths:
+        if t.filled:
+            draw.polygon(points, fill=colour)
+        else:
+            # Deliberately open: the screen edge supplies the triangle's base.
+            draw.line(points, fill=colour, width=max(1, t.width), joint="curve")
+
+
 def _draw_grid(draw: ImageDraw.ImageDraw, w: int, h: int, cfg: HorizonConfig, rgb) -> None:
     g = cfg.grid
     spacing = max(24, g.spacing)
@@ -148,10 +171,14 @@ def compose_image(
         )
 
     canvas = Image.fromarray(base)
+    rgb = parse_color(cfg.color)
+    if cfg.triangles.enabled and cfg.triangles.alpha > 0:
+        triangles = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        _draw_triangles(ImageDraw.Draw(triangles), width, height, cfg, rgb)
+        canvas = Image.alpha_composite(canvas, triangles)
 
     shapes = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(shapes)
-    rgb = parse_color(cfg.color)
     if cfg.grid.enabled:
         _draw_grid(draw, width, height, cfg, rgb)
     if cfg.frame.enabled:

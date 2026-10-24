@@ -144,3 +144,57 @@ def test_import_export_roundtrip(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         api.import_config()
     assert load(api._cfg_path).frame.width == 19
+
+
+def test_triangles_panel_persistence_preview_and_reset(tmp_path, monkeypatch):
+    import base64
+    import io
+
+    from PIL import Image
+
+    monkeypatch.setattr(ipc, "find_overlay", lambda: 0)
+    api = Api(tmp_path / "config.json")
+    initial_preview = api.preview()
+    settings = {
+        "enabled": True,
+        "filled": True,
+        "base": 65.0,
+        "depth": 27.0,
+        "width": 8,
+        "alpha": 102,
+    }
+    state = api.patch({"triangles": settings})
+    assert state["config"]["triangles"] == settings
+    assert api.preview() != initial_preview
+    hollow = api.preview({"triangles": {"filled": False}})
+    assert Image.open(io.BytesIO(base64.b64decode(hollow.split(",", 1)[1]))).width > 0
+    assert load(api._cfg_path).triangles.filled
+    assert api.preset("strong")["config"]["triangles"] == settings
+    assert api.reset()["config"]["triangles"] == default_config().to_dict()["triangles"]
+
+
+def test_triangle_import_export_preserves_mode_and_dimensions(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setattr(ipc, "find_overlay", lambda: 0)
+    imported = tmp_path / "triangles.json"
+    exported = tmp_path / "exported.json"
+    settings = {
+        "enabled": True,
+        "filled": True,
+        "base": 68.0,
+        "depth": 33.0,
+        "width": 7,
+        "alpha": 81,
+    }
+    imported.write_text(json.dumps({"triangles": settings}))
+    api = Api(tmp_path / "active.json")
+
+    class Dialog:
+        def create_file_dialog(self, kind, **kwargs):
+            return str(exported) if "save_filename" in kwargs else [str(imported)]
+
+    api._window = Dialog()
+    assert api.import_config()["config"]["triangles"] == settings
+    api.export_config()
+    assert load(exported).to_dict()["triangles"] == settings

@@ -18,6 +18,7 @@ from .hotkeys import DEFAULT_HOTKEYS, validate_bindings
 __all__ = [
     "Vignette",
     "Frame",
+    "EdgeTriangles",
     "Reticle",
     "AnchorGrid",
     "Session",
@@ -59,6 +60,18 @@ class Frame:
     inset: int = 26
     width: int = 8
     alpha: int = 90
+
+
+@dataclass
+class EdgeTriangles:
+    """Four fixed inward triangles, sized as percentages of the screen."""
+
+    enabled: bool = False
+    filled: bool = False
+    base: float = 50.0
+    depth: float = 20.0
+    width: int = 3
+    alpha: int = 153
 
 
 @dataclass
@@ -105,11 +118,12 @@ class Stats:
 class HorizonConfig:
     vignette: Vignette = field(default_factory=Vignette)
     frame: Frame = field(default_factory=Frame)
+    triangles: EdgeTriangles = field(default_factory=EdgeTriangles)
     reticle: Reticle = field(default_factory=Reticle)
     grid: AnchorGrid = field(default_factory=AnchorGrid)
     session: Session = field(default_factory=Session)
     stats: Stats = field(default_factory=Stats)
-    color: str = "#00FF66"  # bright green; applies to frame / reticle / grid / HUD text
+    color: str = "#00FF66"  # bright green; applies to shapes and HUD text
     monitor: int = 0
     start_hidden: bool = False
     tray_hint_shown: bool = False  # one-time "where did the icon go" notification
@@ -228,6 +242,10 @@ _LIMITS: dict[tuple[str, str], tuple[float, float]] = {
     ("frame", "inset"): (0, 400),
     ("frame", "width"): (1, 60),
     ("frame", "alpha"): (0, 255),
+    ("triangles", "base"): (1.0, 100.0),
+    ("triangles", "depth"): (1.0, 100.0),
+    ("triangles", "width"): (1, 60),
+    ("triangles", "alpha"): (0, 255),
     ("reticle", "size"): (1, 80),
     ("reticle", "gap"): (0, 80),
     ("reticle", "alpha"): (0, 255),
@@ -299,7 +317,7 @@ def apply_patch(cfg: HorizonConfig, patch: dict[str, Any]) -> HorizonConfig:
     except ValueError:
         new.hotkeys = cfg.hotkeys.copy()
 
-    for section in ("vignette", "frame", "reticle", "grid", "session", "stats"):
+    for section in ("vignette", "frame", "triangles", "reticle", "grid", "session", "stats"):
         obj = getattr(new, section)
         base = getattr(cfg, section)
         for f in fields(obj):

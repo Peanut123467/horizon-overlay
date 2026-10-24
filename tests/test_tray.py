@@ -85,6 +85,21 @@ def test_unknown_action_returns_none():
     assert apply_setting(default_config(), 999, 0) is None
 
 
+def test_triangles_tray_toggle_preserves_shape_settings():
+    from horizon import overlay
+
+    cfg = default_config()
+    cfg.triangles.filled = True
+    cfg.triangles.width = 8
+    cfg.triangles.alpha = 101
+    assert apply_setting(cfg, overlay.SET_TRIANGLES, 1) is cfg
+    assert cfg.triangles.enabled
+    apply_setting(cfg, overlay.SET_TRIANGLES, 0)
+    assert not cfg.triangles.enabled
+    assert cfg.triangles.filled and cfg.triangles.width == 8 and cfg.triangles.alpha == 101
+    assert _preset_key(type("A", (), {"cfg": cfg})()) == "standard"
+
+
 def test_preset_key_detects_default():
     cfg = default_config()
     assert _preset_key(type("A", (), {"cfg": cfg})()) == "standard"

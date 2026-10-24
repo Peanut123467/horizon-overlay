@@ -50,7 +50,7 @@ TIMER_SESSION = 2
 TIMER_AUTOQUIT = 3
 TIMER_STATS = 4
 TIMER_HINT = 5
-TIMER_APPLY = 6  # debounce for IPC patches
+TIMER_APPLY = 6  # coalesce IPC patches without postponing the first redraw
 
 HOTKEY_TOGGLE = 1
 HOTKEY_GENTLE = 2
@@ -90,6 +90,7 @@ SET_FRAME = 4
 SET_RETICLE = 5
 SET_GRID = 6
 SET_STATS = 7
+SET_TRIANGLES = 8
 
 # index -> vignette strength. 0 disables the vignette entirely.
 VIGNETTE_LEVELS: tuple[float, ...] = (0.0, 0.35, 0.55, 0.78)
@@ -124,6 +125,8 @@ def apply_setting(cfg: HorizonConfig, action: int, value: int) -> HorizonConfig 
         cfg.grid.enabled = bool(value)
     elif action == SET_STATS:
         cfg.stats.enabled = bool(value)
+    elif action == SET_TRIANGLES:
+        cfg.triangles.enabled = bool(value)
     else:
         return None
     return cfg
@@ -180,6 +183,7 @@ class HorizonApp:
 
         self._visible = not cfg.start_hidden
         self._render_key: str | None = None
+        self._apply_pending = False
         self._draw_ms = 0.0
         self._hud_last_text: str | None = None
         self._session_start = time.monotonic()
@@ -359,6 +363,7 @@ class HorizonApp:
             self._refresh_hud()
         elif timer_id == TIMER_APPLY:
             win32.kill_timer(self.main.hwnd, TIMER_APPLY)
+            self._apply_pending = False
             self._persist()
             self.redraw(force=True)
             self._sync_hud()
@@ -503,7 +508,7 @@ class HorizonApp:
         """Handle a JSON patch from the control panel.
 
         Applying the patch to ``self.cfg`` is immediate, but the redraw is
-        coalesced on an 80 ms timer: dragging a slider fires dozens of patches
+        coalesced on an 80 ms timer without restarting its deadline: dragging fires patches
         a second and a full-screen recompose costs ~140 ms at 1440p.
         """
         from .ipc import read_payload
@@ -532,7 +537,9 @@ class HorizonApp:
         if self.cfg_path:
             save(self.cfg, self.cfg_path)
         self._on_display_change()
-        win32.set_timer(self.main.hwnd, TIMER_APPLY, 80)
+        if not self._apply_pending:
+            win32.set_timer(self.main.hwnd, TIMER_APPLY, 80)
+            self._apply_pending = True
         return 1
 
     def _apply_setting(self, action: int, value: int) -> None:

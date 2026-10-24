@@ -95,6 +95,25 @@ def main():
         saved.tray_hint_shown = False
         assert saved.to_dict() == default_config().to_dict()
         print("PASS packaged defaults match selected settings", flush=True)
+        root = AutomationElement.FromHandle(IntPtr(hwnd))
+        assert (
+            root.FindFirst(
+                TreeScope.Descendants,
+                PropertyCondition(AutomationElement.NameProperty, "四边三角"),
+            )
+            is not None
+        ), "packaged panel is missing the triangle controls"
+        triangle_settings = {
+            "enabled": True,
+            "filled": True,
+            "base": 65.0,
+            "depth": 27.0,
+            "width": 8,
+            "alpha": 102,
+        }
+        assert ipc.send_payload(ipc.find_overlay(), {"patch": {"triangles": triangle_settings}})
+        assert load(cfg_path).to_dict()["triangles"] == triangle_settings
+        print("PASS packaged triangle controls and live settings", flush=True)
         user32.PostMessageW(hwnd, 0x0010, 0, 0)
         child.wait(timeout=12)
         assert child.returncode == 0

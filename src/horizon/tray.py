@@ -30,6 +30,7 @@ from .overlay import (
     SET_PRESET,
     SET_RETICLE,
     SET_STATS,
+    SET_TRIANGLES,
     SET_VIGNETTE,
     VIGNETTE_LABELS,
     VIGNETTE_LEVELS,
@@ -193,6 +194,11 @@ def start_tray(app, log: Callable[[str], None] = print):
         return _handler
 
     elements_menu = pystray.Menu(
+        pystray.MenuItem(
+            "四边三角",
+            _toggle(SET_TRIANGLES, lambda: app.cfg.triangles.enabled),
+            checked=lambda _item: app.cfg.triangles.enabled,
+        ),
         pystray.MenuItem(
             "边框",
             _toggle(SET_FRAME, lambda: app.cfg.frame.enabled),
