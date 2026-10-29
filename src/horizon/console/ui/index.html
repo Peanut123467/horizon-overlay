@@ -9,61 +9,69 @@
   <body>
     <header class="topbar">
       <div class="brand">
-        <span class="dot"></span>
-        <h1>Horizon 控制台</h1>
+        <svg class="brand-mark" viewBox="0 0 44 44" aria-hidden="true"><path d="M10 24a12 12 0 0 1 24 0"/><path d="M4 25h36M10 31h24M17 37h10"/></svg>
+        <div><h1>HORIZON</h1></div>
       </div>
       <div class="topbar-right">
         <span id="status" class="badge badge-wait">连接中…</span>
-        <button id="btn-start" class="btn btn-ghost" hidden>启动叠加层</button>
         <button id="btn-toggle" class="btn btn-ghost" hidden>显示 / 隐藏</button>
         <button id="btn-stop" class="btn btn-ghost" hidden>停止叠加层</button>
+        <button id="btn-start" class="btn btn-primary" aria-label="启动叠加层" hidden>启动叠加层 <span aria-hidden="true">↗</span></button>
       </div>
     </header>
-
     <main class="layout">
-      <aside class="side">
-        <div class="preview-card">
-          <img id="preview" alt="预览" />
-          <p class="hint">模拟画面，使用与叠加层相同的渲染管线</p>
-        </div>
-
-        <section class="card">
-          <h2>预设</h2>
-          <div class="preset-row">
-            <button class="btn btn-preset" data-preset="gentle">轻微</button>
-            <button class="btn btn-preset" data-preset="standard">标准</button>
-            <button class="btn btn-preset" data-preset="strong">强</button>
+      <div class="workspace">
+        <div class="workspace-heading"><div><h2>视野工作台</h2></div></div>
+        <section class="preview-card" aria-labelledby="preview-heading">
+          <div class="section-heading"><h2 id="preview-heading">视野预览 <span id="preview-name">模拟场景</span></h2><div class="button-row"><button id="btn-preview-import" class="btn btn-small">导入游戏截图</button><button id="btn-preview-reset" class="btn btn-ghost btn-small" hidden>恢复模拟场景</button></div></div>
+          <div id="preview-stage" class="preview-stage" style="--split: 50%">
+            <img id="preview" alt="应用当前外观后的效果预览" />
+            <img id="preview-original" class="preview-original" alt="对比用原始画面" />
+            <div class="compare-line" aria-hidden="true"><span>↔</span></div>
+            <input id="compare-slider" class="compare-drag" type="range" min="0" max="100" value="50" aria-label="拖动中间手柄比较原图与叠加效果" />
+            <span class="preview-tag tag-before">原始画面</span><span class="preview-tag tag-after">叠加效果</span>
           </div>
+          <div class="compare-controls"><button id="btn-compare" class="btn btn-ghost btn-small" aria-pressed="true">关闭对比</button></div>
+          <p class="hint" id="preview-note">模拟场景 · 拖动中间手柄比较原图与效果，预览仅展示外观元素</p>
         </section>
-
-        <section class="card">
-          <h2>颜色</h2>
-          <div class="swatches" id="swatches"></div>
-          <label class="colour-custom">
-            <input type="color" id="colour-input" />
-            <span id="colour-label">#00FF66</span>
-          </label>
+        <section class="card essentials" aria-labelledby="essentials-heading">
+          <div class="section-heading"><h2 id="essentials-heading">基础预设</h2><span class="section-note">调整后自动保存</span></div>
+          <div class="preset-row">
+            <button class="btn btn-preset" data-preset="gentle"><span class="preset-symbol" aria-hidden="true">◯</span><strong>轻微</strong></button>
+            <button class="btn btn-preset" data-preset="standard"><span class="preset-symbol" aria-hidden="true">◎</span><strong>标准</strong></button>
+            <button class="btn btn-preset" data-preset="strong"><span class="preset-symbol" aria-hidden="true">◉</span><strong>强</strong></button>
+          </div>
+          <div class="colour-row"><div><span class="setting-title">参照元素颜色</span></div><div class="swatches" id="swatches"></div><label class="colour-custom"><input type="color" id="colour-input" aria-label="自定义叠加层颜色" /><span id="colour-label">#00FF66</span></label></div>
         </section>
-
-        <section class="card">
-          <h2>其他</h2>
-          <label class="switch-row">
-            <span>启动时不显示叠加层</span>
-            <input type="checkbox" id="start-hidden" class="switch" />
-          </label>
-          <button id="btn-reset" class="btn btn-ghost btn-block">恢复默认</button>
-          <label class="switch-row"><span>登录 Windows 后打开控制面板</span><input type="checkbox" id="startup" class="switch" /></label>
-          <button id="btn-import" class="btn btn-ghost">导入配置</button>
-          <button id="btn-export" class="btn btn-ghost">导出配置</button>
-          <p class="hint">关闭面板后，已启动的叠加层继续在托盘运行。</p>
-          <p id="session-note" class="hint" hidden>当前为命令行临时会话，更改不会写入配置文件。</p>
+        <section class="card library" aria-labelledby="library-heading">
+          <div class="section-heading"><div><h2 id="library-heading">我的外观预设 <span id="profile-count">0 / 50</span></h2></div><button id="btn-profile-save" class="btn">＋ 保存当前外观</button></div>
+          <div id="profile-list" class="profile-list"></div>
+          <p id="profile-empty" class="empty-state">暂无自定义预设<span>调好外观后，点击「保存当前外观」</span></p>
+          <p id="profile-error" class="library-error" role="status" hidden></p>
+        </section>
+      </div>
+      <aside class="settings-panel" aria-label="外观与应用设置">
+        <div class="settings-heading"><h2>外观设置</h2><p>点击分组标题展开更多参数</p></div>
+        <div class="controls" id="controls"></div>
+        <section class="card app-settings">
+          <h2>应用设置</h2>
+          <label class="switch-row"><span>启动时不显示叠加层</span><input type="checkbox" id="start-hidden" class="switch" /></label>
+          <label class="switch-row"><span>登录 Windows 后打开面板</span><input type="checkbox" id="startup" class="switch" /></label>
+          <div class="button-row"><button id="btn-import" class="btn btn-ghost btn-small">导入配置</button><button id="btn-export" class="btn btn-ghost btn-small">导出配置</button><button id="btn-reset" class="btn btn-ghost btn-small">恢复默认</button></div>
+          <p class="hint">关闭面板后，已启动的叠加层继续在托盘运行</p>
+          <p id="session-note" class="hint" hidden>当前为临时会话，更改不会写入配置文件</p>
         </section>
       </aside>
-
-      <section class="controls" id="controls"></section>
     </main>
+    <dialog id="profile-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+      <form id="profile-form">
+        <h2 id="dialog-title">保存当前外观</h2><p id="dialog-description">名称为 1–40 个字符，不能重复</p>
+        <label id="profile-name-label" for="profile-name">预设名称</label><input id="profile-name" type="text" maxlength="40" autocomplete="off" placeholder="例如：夜间探索" />
+        <p id="dialog-error" class="dialog-error" role="alert"></p>
+        <div class="dialog-actions"><button id="dialog-cancel" type="button" class="btn btn-ghost">取消</button><button id="dialog-submit" type="submit" class="btn btn-primary">保存预设</button></div>
+      </form>
+    </dialog>
     <div id="feedback" role="status" aria-live="polite"></div>
-
     <script src="app.js"></script>
   </body>
 </html>

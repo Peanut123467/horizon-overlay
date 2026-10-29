@@ -22,12 +22,15 @@ import time
 from pathlib import Path
 from typing import Any
 
+from PIL import Image, ImageOps, UnidentifiedImageError
+
 from .. import ipc
 from ..config import HorizonConfig, apply_patch, config_path, load, preset, save
-from ..render import mock_frame
+from ..profiles import ProfileStore
+from ..render import _fake_scene, compose_image, mock_frame
 
 UI_DIR = Path(__file__).with_name("ui")
-PREVIEW_SIZE = (520, 293)
+PREVIEW_SIZE = (960, 540)
 
 
 class Api:
@@ -38,6 +41,96 @@ class Api:
         self._window = None
         self._lock = threading.RLock()
         self._temporary_session = False
+        self._preview_image = None
+
+    def _profile_store(self) -> ProfileStore:
+        return ProfileStore(self._cfg_path.with_name("profiles.json"))
+
+    @staticmethod
+    def _image_url(image: Image.Image) -> str:
+        buffer = io.BytesIO()
+        image.save(buffer, "PNG")
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    def _background(self) -> Image.Image:
+        with self._lock:
+            return self._preview_image.copy() if self._preview_image else _fake_scene(*PREVIEW_SIZE)
+
+    def preview_background(self) -> str:
+        return self._image_url(self._background().convert("RGB"))
+
+    def import_preview(self) -> dict[str, str] | None:
+        """Pick a local still image; keep it only for this window's lifetime."""
+        import webview
+
+        paths = self._window.create_file_dialog(
+            webview.FileDialog.OPEN,
+            file_types=("图片 (*.png;*.jpg;*.jpeg;*.webp)",),
+        )
+        if not paths:
+            return None
+        path = Path(paths[0])
+        try:
+            if path.stat().st_size > 20 * 1024 * 1024:
+                raise ValueError("图片不能超过 20 MB")
+            with Image.open(path) as source:
+                if source.width * source.height > 40_000_000:
+                    raise ValueError("图片不能超过 4000 万像素")
+                if source.format not in {"PNG", "JPEG", "WEBP"}:
+                    raise ValueError("请选择 PNG、JPEG 或 WebP 图片")
+                image = ImageOps.exif_transpose(source).convert("RGBA")
+                image.thumbnail(PREVIEW_SIZE, Image.Resampling.LANCZOS)
+                # Flatten transparency so the comparison's two halves have the same base.
+                background = Image.new("RGBA", image.size, "#141c25")
+                background.alpha_composite(image)
+        except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
+            raise ValueError("无法读取这张图片，请选择有效的 PNG、JPEG 或 WebP 图片") from exc
+        with self._lock:
+            self._preview_image = background
+        return {"name": path.name, "background": self._image_url(background.convert("RGB"))}
+
+    def reset_preview(self) -> dict[str, str]:
+        with self._lock:
+            self._preview_image = None
+        return {"name": "模拟场景", "background": self.preview_background()}
+
+    def profiles(self) -> list[dict]:
+        with self._lock:
+            return [
+                {
+                    "id": p["id"],
+                    "name": p["name"],
+                    "visuals": p["visuals"],
+                    "thumbnail": self._image_url(
+                        mock_frame(apply_patch(HorizonConfig(), p["visuals"]), 240, 135)
+                    ),
+                }
+                for p in self._profile_store().list()
+            ]
+
+    def save_profile(self, name: str) -> list[dict]:
+        with self._lock:
+            self._profile_store().save(name, self._load())
+            return self.profiles()
+
+    def apply_profile(self, identifier: str) -> dict[str, Any]:
+        with self._lock:
+            return self.patch(self._profile_store().get(identifier))
+
+    def rename_profile(self, identifier: str, name: str) -> list[dict]:
+        with self._lock:
+            self._profile_store().rename(identifier, name)
+            return self.profiles()
+
+    def duplicate_profile(self, identifier: str) -> list[dict]:
+        with self._lock:
+            self._profile_store().duplicate(identifier)
+            return self.profiles()
+
+    def delete_profile(self, identifier: str) -> list[dict]:
+        with self._lock:
+            self._profile_store().delete(identifier)
+            return self.profiles()
 
     # -- helpers -----------------------------------------------------------
 
@@ -158,11 +251,11 @@ class Api:
     def preview(self, changes: dict[str, Any] | None = None) -> str:
         """Render the mock frame with pending changes applied, as a data URL."""
         cfg = apply_patch(self._load(), changes or {})
-        image = mock_frame(cfg, *PREVIEW_SIZE)
-        buffer = io.BytesIO()
-        image.save(buffer, "PNG", optimize=True)
-        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
+        background = self._background()
+        image = Image.alpha_composite(background, compose_image(cfg, *background.size)).convert(
+            "RGB"
+        )
+        return self._image_url(image)
 
     def stop_overlay(self) -> dict[str, Any]:
         from .. import win32
@@ -332,10 +425,10 @@ def _run_window(cfg_path: Path | None = None) -> int:
         "Horizon 控制台",
         html=load_html(),
         js_api=api,
-        width=1000,
-        height=720,
+        width=1280,
+        height=820,
         min_size=(860, 600),
-        background_color="#0d0f12",
+        background_color="#101820",
     )
     api._window = window
     install_close_guard(window)

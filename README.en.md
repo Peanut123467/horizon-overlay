@@ -6,7 +6,7 @@ Horizon is a Windows utility for players who experience motion discomfort in 3D 
 
 **[Download Horizon.exe](https://github.com/Peanut123467/horizon-overlay/releases/latest)** · Windows 10 / 11 · No installer · Apache-2.0
 
-**v0.2.2:** fixes vignette parameters, configuration recovery, multi-monitor metrics and panel synchronization; reduces retained vignette memory; adds English and Japanese documentation. See the [changelog](CHANGELOG.md).
+**v0.3.0:** redesigned control panel, screenshot comparison with a draggable centre handle, and a local visual preset library; removes nonessential captions and protects corrupted preset files. See the [release notes](docs/releases/v0.3.0.md)
 
 ![Standard preset comparison](docs/compare-standard.png)
 
@@ -16,7 +16,7 @@ Horizon is a Windows utility for players who experience motion discomfort in 3D 
 
 - Adjustable vignette, border, centre reticle and optional dot grid.
 - Optional reference triangles on all four edges, with outline/filled modes, base width, depth, outline thickness and opacity controls.
-- Local control panel with live simulated preview, presets, colours, monitor selection and configuration import/export.
+- Local control panel with live preview, screenshot comparison, up to 50 custom visual presets, colours, monitor selection and configuration import/export
 - System tray controls, configurable global shortcuts and local break reminders.
 - HUD showing the overlay monitor's refresh rate, this process's memory, system memory load and the latest full redraw time.
 - No DLL injection, graphics hooks, game-process access, game-file changes, network requests, telemetry or health-data collection.

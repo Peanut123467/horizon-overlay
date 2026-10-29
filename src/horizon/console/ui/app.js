@@ -14,7 +14,6 @@ const SCHEMA = [
   {
     key: "vignette",
     label: "暗角",
-    desc: "压暗画面四周，减少周边视野里的光流",
     fields: [
       { name: "enabled", type: "switch", label: "启用" },
       { name: "inner", label: "起始半径", type: "range", min: 0, max: 2, step: 0.01 },
@@ -25,7 +24,6 @@ const SCHEMA = [
   {
     key: "frame",
     label: "边框",
-    desc: "一圈固定的参照边缘，不随镜头移动",
     fields: [
       { name: "enabled", type: "switch", label: "启用" },
       { name: "inset", label: "距屏幕边缘", type: "range", min: 0, max: 400, step: 1, unit: "px" },
@@ -36,7 +34,6 @@ const SCHEMA = [
   {
     key: "triangles",
     label: "四边三角",
-    desc: "四边固定的 V 形参照，大小统一调节，颜色跟随全局设置",
     fields: [
       { name: "enabled", type: "switch", label: "启用" },
       { name: "filled", label: "样式", type: "select", boolean: true, options: [["false", "空心"], ["true", "实心"]] },
@@ -49,7 +46,6 @@ const SCHEMA = [
   {
     key: "reticle",
     label: "中心准星",
-    desc: "屏幕正中的四个短刻度，给眼睛一个锚点",
     fields: [
       { name: "enabled", type: "switch", label: "启用" },
       { name: "size", label: "刻度长度", type: "range", min: 1, max: 80, step: 1, unit: "px" },
@@ -60,7 +56,6 @@ const SCHEMA = [
   {
     key: "grid",
     label: "锚点阵",
-    desc: "均匀分布的小点，适合需要更多参照的情况",
     fields: [
       { name: "enabled", type: "switch", label: "启用" },
       { name: "spacing", label: "点间距", type: "range", min: 24, max: 2000, step: 1, unit: "px" },
@@ -71,7 +66,6 @@ const SCHEMA = [
   {
     key: "stats",
     label: "统计面板",
-    desc: "刷新率、本程序内存、系统内存、上次重绘耗时",
     fields: [
       { name: "enabled", type: "switch", label: "启用" },
       {
@@ -93,7 +87,6 @@ const SCHEMA = [
   {
     key: "session",
     label: "休息提醒",
-    desc: "连续游玩到设定时长后，在画面底部提示起身活动",
     fields: [
       { name: "enabled", type: "switch", label: "启用" },
       { name: "minutes", label: "提醒间隔", type: "range", min: 1, max: 600, step: 1, unit: " 分钟" },
@@ -117,6 +110,11 @@ const pendingPatch = {};
 const drawerStates = new Map();
 let activeSelect = null;
 let selectSerial = 0;
+let profiles = [];
+let previewGeneration = 0;
+let previewSourceChanging = false;
+let profileDialogAction = null;
+let profileDialogBusy = false;
 
 document.addEventListener("pointerdown", (event) => {
   if (activeSelect && !activeSelect.contains(event.target)) activeSelect.close(false);
@@ -314,7 +312,7 @@ function formatValue(value, field) {
 }
 
 function setAccent(hex) {
-  document.documentElement.style.setProperty("--accent", hex);
+  document.documentElement.style.setProperty("--overlay-color", hex);
 }
 
 /* --------------------------------------------------------------- patching */
@@ -388,12 +386,14 @@ function queuePreview() {
 
 async function refreshPreview() {
   previewTimer = null;
+  if (previewSourceChanging) { previewPending = true; return; }
   previewPending = false;
   previewInFlight = true;
+  const generation = previewGeneration;
   try {
     const src = await api.preview(cfg);
     // Display intermediate frames too: continuous input must not starve painting.
-    $("#preview").src = src;
+    if (generation === previewGeneration) $("#preview").src = src;
   } catch (err) {
     showError(err);
   } finally {
@@ -404,9 +404,9 @@ async function refreshPreview() {
 
 function setValue(group, name, value) {
   editRevision++;
-  markActivePreset();
   if (group) cfg[group][name] = value;
   else cfg[name] = value;
+  markActivePreset();
   if (group === "triangles") refreshDisabled();
   if (group === "vignette") refreshVignetteLimits();
   queuePatch(group ? { [group]: { [name]: value } } : { [name]: value });
@@ -497,11 +497,6 @@ function makeGroup(group) {
   }
   el.appendChild(head);
 
-  const desc = document.createElement("p");
-  desc.className = "group-desc";
-  desc.textContent = group.desc;
-  el.appendChild(desc);
-
   for (const field of group.fields) {
     if (field.name === "enabled") continue;
     el.appendChild(makeField(group, field));
@@ -520,11 +515,6 @@ function makeMonitorGroup(monitors) {
   title.textContent = "显示器";
   head.appendChild(title);
   el.appendChild(head);
-
-  const desc = document.createElement("p");
-  desc.className = "group-desc";
-  desc.textContent = "叠加层一次只覆盖一个显示器，切换后即时生效";
-  el.appendChild(desc);
 
   const row = document.createElement("div");
   row.className = "field";
@@ -561,6 +551,7 @@ function refreshDisabled() {
 
 function markActivePreset() {
   document.querySelectorAll(".btn-preset").forEach((btn) => btn.classList.remove("active"));
+  updateProfileSelection();
 }
 
 function renderSwatches() {
@@ -571,6 +562,7 @@ function renderSwatches() {
       btn.className = "swatch";
       btn.style.background = hex;
       btn.title = hex;
+      btn.setAttribute("aria-label", `叠加层颜色 ${hex}`);
       btn.addEventListener("click", () => applyColour(hex));
       box.appendChild(btn);
     }
@@ -673,7 +665,7 @@ function decorateDrawers(controls) {
       section.classList.toggle("collapsed", !expanded);
       inner.inert = !expanded;
     }
-    setExpanded(drawerStates.get(key) !== false);
+    setExpanded(drawerStates.has(key) ? drawerStates.get(key) : ["vignette", "frame", "reticle"].includes(key));
     toggle.addEventListener("click", () => setExpanded(!drawerStates.get(key)));
   }
 }
@@ -716,7 +708,7 @@ function makeHotkeyGroup() {
 }
 
 function bindAction(selector, work) {
-  const button = $(selector);
+  const button = typeof selector === "string" ? $(selector) : selector;
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
@@ -739,6 +731,7 @@ async function boot() {
     monitors = await api.monitors();
     hotkeyLabels = await api.hotkey_options();
     renderState(await api.state());
+    await bootStudio();
     $("#startup").checked = await api.startup();
     $("#startup").addEventListener("change", async (event) => {
       const input = event.target;
@@ -804,3 +797,166 @@ async function boot() {
 
 window.addEventListener("unhandledrejection", (event) => showError(event.reason));
 window.addEventListener("pywebviewready", boot);
+
+/* --------------------------------------------------------- preview studio */
+function updateProfileSelection() {
+  if (!cfg) return;
+  for (const card of document.querySelectorAll('.profile-card')) {
+    const profile = profiles.find(p => p.id === card.dataset.id);
+    const matches = profile && Object.keys(profile.visuals).every(key =>
+      JSON.stringify(cfg[key]) === JSON.stringify(profile.visuals[key]));
+    card.classList.toggle('active', !!matches);
+    card.querySelector('.profile-apply').setAttribute('aria-pressed', String(!!matches));
+  }
+}
+
+function renderProfiles(items) {
+  profiles = items;
+  const list = $('#profile-list');
+  list.replaceChildren();
+  $('#profile-empty').hidden = items.length > 0;
+  $('#profile-count').textContent = `${items.length} / 50`;
+  $('#profile-error').hidden = true;
+  for (const profile of items) {
+    const card = document.createElement('article');
+    card.className = 'profile-card';
+    card.dataset.id = profile.id;
+    const apply = document.createElement('button');
+    apply.className = 'profile-apply';
+    apply.type = 'button';
+    apply.setAttribute('aria-label', `应用预设：${profile.name}`);
+    const image = document.createElement('img');
+    image.src = profile.thumbnail;
+    image.alt = '';
+    const title = document.createElement('strong');
+    title.textContent = profile.name;
+    title.title = profile.name;
+    apply.append(image, title);
+    bindAction(apply, async () => {
+      renderState(await api.apply_profile(profile.id));
+      notify(`已应用「${profile.name}」`);
+    });
+    const actions = document.createElement('div');
+    actions.className = 'profile-actions';
+    const makeAction = (label, work) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-ghost';
+      button.textContent = label;
+      button.setAttribute('aria-label', `${label}预设：${profile.name}`);
+      bindAction(button, work);
+      actions.appendChild(button);
+    };
+    makeAction('复制', async () => {
+      renderProfiles(await api.duplicate_profile(profile.id));
+      notify('已创建独立的预设副本');
+    });
+    makeAction('命名', async () => openProfileDialog('rename', profile));
+    makeAction('删除', async () => openProfileDialog('delete', profile));
+    card.append(apply, actions);
+    list.appendChild(card);
+  }
+  updateProfileSelection();
+}
+
+function openProfileDialog(mode, profile = null) {
+  profileDialogAction = {mode, profile};
+  const deleting = mode === 'delete';
+  $('#dialog-title').textContent = deleting ? '删除这个预设？' : mode === 'rename' ? '重命名预设' : '保存当前外观';
+  $('#dialog-description').textContent = deleting
+    ? `将从预设库中移除「${profile.name}」，当前使用的外观不会改变`
+    : '名称为 1–40 个字符，不能重复';
+  $('#profile-name-label').hidden = deleting;
+  $('#profile-name').hidden = deleting;
+  $('#profile-name').required = !deleting;
+  $('#profile-name').value = mode === 'rename' ? profile.name : '';
+  $('#dialog-error').textContent = '';
+  $('#dialog-submit').textContent = deleting ? '确认删除' : mode === 'rename' ? '保存名称' : '保存预设';
+  $('#profile-dialog').showModal();
+  if (!deleting) { $('#profile-name').focus(); $('#profile-name').select(); }
+  else $('#dialog-cancel').focus();
+}
+
+async function submitProfileDialog(event) {
+  event.preventDefault();
+  if (profileDialogBusy) return;
+  profileDialogBusy = true;
+  $('#dialog-submit').disabled = true;
+  $('#dialog-cancel').disabled = true;
+  const {mode, profile} = profileDialogAction;
+  try {
+    await flushPatch();
+    await enqueue(async () => {
+      let items;
+      if (mode === 'delete') items = await api.delete_profile(profile.id);
+      else if (mode === 'rename') items = await api.rename_profile(profile.id, $('#profile-name').value);
+      else items = await api.save_profile($('#profile-name').value);
+      renderProfiles(items);
+      $('#profile-dialog').close();
+      notify(mode === 'delete' ? '预设已删除' : mode === 'rename' ? '预设名称已更新' : '当前外观已保存');
+    });
+  } catch (err) {
+    $('#dialog-error').textContent = err.message || String(err);
+  } finally {
+    profileDialogBusy = false;
+    $('#dialog-submit').disabled = false;
+    $('#dialog-cancel').disabled = false;
+  }
+}
+
+async function decodedImage(src) {
+  const image = new Image();
+  image.src = src;
+  await image.decode();
+  return src;
+}
+
+async function changePreviewSource(operation) {
+  previewSourceChanging = true;
+  const generation = ++previewGeneration;
+  try {
+    const result = await operation();
+    if (!result) return;
+    const effect = await api.preview(cfg);
+    await Promise.all([decodedImage(result.background), decodedImage(effect)]);
+    if (generation !== previewGeneration) return;
+    $('#preview-original').src = result.background;
+    $('#preview').src = effect;
+    $('#preview-name').textContent = result.name;
+    $('#preview-name').title = result.name;
+    const imported = result.name !== '模拟场景';
+    $('#btn-preview-reset').hidden = !imported;
+    $('#preview-note').textContent = '拖动中间手柄比较原图与效果，预览仅展示外观元素';
+    notify(imported ? '截图已载入，可以开始比较和调整' : '已恢复模拟场景');
+  } finally {
+    previewSourceChanging = false;
+    queuePreview();
+  }
+}
+
+async function bootStudio() {
+  $('#preview-original').src = await api.preview_background();
+  try { renderProfiles(await api.profiles()); }
+  catch (err) {
+    $('#profile-empty').hidden = true;
+    $('#profile-error').hidden = false;
+    $('#profile-error').textContent = err.message || String(err);
+  }
+  $('#compare-slider').addEventListener('input', (event) => {
+    const value = event.target.value;
+    $('#preview-stage').style.setProperty('--split', `${value}%`);
+    event.target.setAttribute('aria-valuetext', `原图 ${value}%，叠加效果 ${100 - Number(value)}%`);
+  });
+  $('#btn-compare').addEventListener('click', () => {
+    const off = $('#preview-stage').classList.toggle('compare-off');
+    $('#btn-compare').setAttribute('aria-pressed', String(!off));
+    $('#btn-compare').textContent = off ? '开启对比' : '关闭对比';
+    $('#compare-slider').disabled = off;
+  });
+  bindAction('#btn-preview-import', () => changePreviewSource(() => api.import_preview()));
+  bindAction('#btn-preview-reset', () => changePreviewSource(() => api.reset_preview()));
+  bindAction('#btn-profile-save', async () => openProfileDialog('save'));
+  $('#profile-form').addEventListener('submit', submitProfileDialog);
+  $('#dialog-cancel').addEventListener('click', () => $('#profile-dialog').close());
+  $('#profile-dialog').addEventListener('cancel', (event) => { if (profileDialogBusy) event.preventDefault(); });
+}

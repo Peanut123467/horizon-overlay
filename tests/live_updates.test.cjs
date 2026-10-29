@@ -140,7 +140,7 @@ test('explicit flush waits for the final merged values even with an active reque
 
 test('an already running background poll cannot restore stale slider values', async () => {
   const h = harness(40);
-  h.run('renderState = state => { cfg=state.config; queuePreview(); }; bindAction=()=>{};');
+  h.run('renderState = state => { cfg=state.config; queuePreview(); }; bindAction=()=>{}; bootStudio=async()=>{};');
   await h.run('boot()');
   assert.equal(h.intervals.length, 1);
   await h.tick(100);
@@ -180,4 +180,26 @@ test('backend canonical values are used after the final edit completes', async (
   await h.tick(200);
   assert.equal(h.run('cfg.frame.width'), 10);
   assert.equal(h.frames.at(-1), 'frame-10');
+});
+
+test('in-flight preview from the previous background is discarded', async () => {
+  const h = harness(120);
+  h.run('queuePreview()');
+  await h.tick(40);
+  h.run('previewGeneration++; previewSourceChanging=true;');
+  await h.tick(150);
+  assert.equal(h.frames.length, 0, 'old background was painted after switching sources');
+  h.run('cfg.frame.width=9; previewSourceChanging=false; queuePreview();');
+  await h.tick(250);
+  assert.equal(h.frames.at(-1), 'frame-9');
+});
+
+test('source import pauses previews and resumes with the latest edit', async () => {
+  const h = harness(20);
+  h.run('previewSourceChanging=true; queuePreview();');
+  await h.tick(500);
+  assert.equal(h.previews.length, 0);
+  h.run('cfg.frame.width=71; previewSourceChanging=false; queuePreview();');
+  await h.tick(100);
+  assert.equal(h.frames.at(-1), 'frame-71');
 });
