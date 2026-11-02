@@ -600,3 +600,10 @@ dialog .dialog-error { color: #ffc0ae !important; min-height: 20px; margin: 8px 
 .compare-controls { justify-content: flex-end; }
 .btn-preset { align-items: center; }
 .preset-symbol { grid-row: auto; }
+.library-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.library .section-heading { flex-wrap: wrap; gap: 10px; }
+.profile-binding { display: flex; align-items: center; gap: 4px; padding: 4px 8px; }
+.profile-binding .btn { padding: 6px; font-size: 11px; min-width: 0; }
+.profile-hotkey { overflow-wrap: anywhere; text-align: left; flex: 1; }
+.profile-hotkey[data-recording="true"] { color: var(--accent); outline: 1px solid var(--accent); }
+.profile-actions { flex-wrap: wrap; }

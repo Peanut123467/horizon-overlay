@@ -22,7 +22,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import metrics, win32
-from .config import COLOR_PALETTE, HorizonConfig, apply_patch, next_color, preset, save
+from .config import COLOR_PALETTE, HorizonConfig, apply_patch, config_path, next_color, preset, save
+from .profiles import ProfileStore
 from .render import compose, compose_stats
 
 __all__ = ["HorizonApp"]
@@ -183,6 +184,8 @@ class HorizonApp:
         self._wndproc = None  # must stay referenced while windows live
         self._tray = None
         self.hotkey_map: dict[int, str] = {}
+        self.profile_hotkey_map: dict[int, str] = {}
+        self._failed_profile_hotkeys: set[str] = set()
 
         self._visible = not cfg.start_hidden
         self._render_key: str | None = None
@@ -243,6 +246,25 @@ class HorizonApp:
         from .hotkeys import DEFAULT_HOTKEYS, parse_binding
 
         self._unregister_hotkeys()
+        self._failed_profile_hotkeys.clear()
+        try:
+            known = {p["id"] for p in self._profile_store().list()}
+        except ValueError as exc:
+            self.log(f"[horizon] {exc}")
+            known = set()
+        # Register custom bindings first so a built-in fallback cannot steal one.
+        for hotkey_id, (identifier, binding) in enumerate(
+            sorted(self.cfg.profile_hotkeys.items()), 100
+        ):
+            if identifier not in known:
+                continue
+            mods, vk = parse_binding(binding)
+            if win32.register_hotkey(self.main.hwnd, hotkey_id, mods, vk):
+                self.hotkey_map[hotkey_id] = binding
+                self.profile_hotkey_map[hotkey_id] = identifier
+            else:
+                self._failed_profile_hotkeys.add(identifier)
+                self.log(f"[horizon] preset hotkey unavailable: {binding}")
         for hotkey_id, action, label, candidates in HOTKEY_BINDINGS:
             requested = self.cfg.hotkeys[action]
             options = [requested]
@@ -262,6 +284,25 @@ class HorizonApp:
             for key_id in self.hotkey_map:
                 win32.user32.UnregisterHotKey(self.main.hwnd, key_id)
         self.hotkey_map.clear()
+        self.profile_hotkey_map.clear()
+
+    def _profile_store(self) -> ProfileStore:
+        return ProfileStore((self.cfg_path or config_path()).with_name("profiles.json"))
+
+    def _apply_profile(self, identifier: str) -> bool:
+        try:
+            visuals = self._profile_store().get(identifier)
+        except (ValueError, TypeError) as exc:
+            self.log(f"[horizon] cannot apply preset: {exc}")
+            return False
+        self.cfg = apply_patch(self.cfg, visuals)
+        self._persist()
+        from .tray import refresh_icon
+
+        refresh_icon(self._tray, self.cfg.color)
+        self.redraw()
+        self._sync_hud()
+        return True
 
     def _maybe_show_tray_hint(self) -> None:
         """First run: point at the tray icon *on the overlay itself*.
@@ -342,6 +383,9 @@ class HorizonApp:
         return win32.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
     def _on_hotkey(self, hotkey_id: int) -> None:
+        if hotkey_id in self.profile_hotkey_map:
+            self._apply_profile(self.profile_hotkey_map[hotkey_id])
+            return
         if hotkey_id == HOTKEY_TOGGLE:
             self.toggle()
             return
@@ -556,17 +600,27 @@ class HorizonApp:
                 )
             )
 
+        if "apply_profile" in payload:
+            identifier = payload["apply_profile"]
+            return int(isinstance(identifier, str) and self._apply_profile(identifier))
+
         patch = payload.get("patch", payload)
         previous = self.cfg
         self.cfg = apply_patch(self.cfg, patch)
-        if self.cfg.hotkeys != previous.hotkeys:
+        if (
+            self.cfg.hotkeys != previous.hotkeys
+            or self.cfg.profile_hotkeys != previous.profile_hotkeys
+        ):
             self._register_hotkeys()
             changed = [
                 key_id
                 for key_id, action, _label, _candidates in HOTKEY_BINDINGS
                 if self.cfg.hotkeys[action] != previous.hotkeys[action]
             ]
-            if any(key_id not in self.hotkey_map for key_id in changed):
+            if (
+                any(key_id not in self.hotkey_map for key_id in changed)
+                or self._failed_profile_hotkeys
+            ):
                 self.cfg = previous
                 self._register_hotkeys()
                 return 2  # delivered, but the requested hotkey is unavailable

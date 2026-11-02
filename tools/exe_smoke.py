@@ -44,6 +44,12 @@ def main():
     if ipc.find_overlay() or user32.FindWindowW(None, "Horizon 控制台"):
         raise SystemExit("Close Horizon before the packaged client check.")
     cfg_path = Path(tempfile.mkdtemp(dir=ROOT / ".runtime")) / "config.json"
+    from horizon.config import default_config
+    from horizon.profiles import ProfileStore
+
+    store = ProfileStore(cfg_path.with_name("profiles.json"))
+    store.save("打包预设", default_config())
+    profile_id = store.list()[0]["id"]
     command = [str(ROOT / "dist" / "Horizon.exe"), "--config", str(cfg_path)]
     env = os.environ.copy()
     env["HORIZON_WEBVIEW_ARGS"] = "--in-process-gpu --force-renderer-accessibility"
@@ -114,6 +120,31 @@ def main():
         assert ipc.send_payload(ipc.find_overlay(), {"patch": {"triangles": triangle_settings}})
         assert load(cfg_path).to_dict()["triangles"] == triangle_settings
         print("PASS packaged triangle controls and live settings", flush=True)
+        for name in ("导入预设", "设置快捷键：打包预设", "导出预设：打包预设"):
+            assert (
+                root.FindFirst(
+                    TreeScope.Descendants,
+                    PropertyCondition(AutomationElement.NameProperty, name),
+                )
+                is not None
+            ), f"packaged v0.4 control missing: {name}"
+        assert ipc.send_payload(
+            ipc.find_overlay(), {"patch": {"profile_hotkeys": {profile_id: "Ctrl+Alt+Shift+J"}}}
+        )
+        assert load(cfg_path).profile_hotkeys == {profile_id: "Ctrl+Alt+Shift+J"}
+        assert ipc.send_payload(ipc.find_overlay(), {"patch": {"color": "#112233"}})
+        from horizon import win32
+
+        win32.user32.PostMessageW(ipc.find_overlay(), win32.WM_HOTKEY, 100, 0)
+        deadline = time.monotonic() + 5
+        while load(cfg_path).color != "#00FF66" and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert load(cfg_path).color == "#00FF66"
+        assert ipc.send_payload(
+            ipc.find_overlay(), {"patch": {"profile_hotkeys": {profile_id: ""}}}
+        )
+        assert not load(cfg_path).profile_hotkeys
+        print("PASS packaged v0.4 controls, profile hotkey and binding cleanup", flush=True)
         user32.PostMessageW(hwnd, 0x0010, 0, 0)
         child.wait(timeout=12)
         assert child.returncode == 0

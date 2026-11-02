@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .hotkeys import DEFAULT_HOTKEYS, validate_bindings
+from .hotkeys import DEFAULT_HOTKEYS, validate_bindings, validate_profile_bindings
 
 __all__ = [
     "Vignette",
@@ -132,6 +132,7 @@ class HorizonConfig:
     start_hidden: bool = False
     tray_hint_shown: bool = False  # one-time "where did the icon go" notification
     hotkeys: dict[str, str] = field(default_factory=lambda: DEFAULT_HOTKEYS.copy())
+    profile_hotkeys: dict[str, str] = field(default_factory=dict)
 
     # -- (de)serialisation -------------------------------------------------
 
@@ -339,7 +340,7 @@ def apply_patch(cfg: HorizonConfig, patch: dict[str, Any]) -> HorizonConfig:
             continue
         if isinstance(value, dict) and isinstance(merged[key], dict):
             for sub_key, sub_value in value.items():
-                if sub_key in merged[key]:
+                if sub_key in merged[key] or key == "profile_hotkeys":
                     merged[key][sub_key] = sub_value
         elif not isinstance(merged[key], dict):
             merged[key] = value
@@ -349,6 +350,11 @@ def apply_patch(cfg: HorizonConfig, patch: dict[str, Any]) -> HorizonConfig:
         new.hotkeys = validate_bindings(merged["hotkeys"])
     except ValueError:
         new.hotkeys = cfg.hotkeys.copy()
+    try:
+        new.profile_hotkeys = validate_profile_bindings(merged["profile_hotkeys"], new.hotkeys)
+    except ValueError:
+        new.hotkeys = cfg.hotkeys.copy()
+        new.profile_hotkeys = cfg.profile_hotkeys.copy()
 
     for section in ("vignette", "frame", "triangles", "reticle", "grid", "session", "stats"):
         obj = getattr(new, section)

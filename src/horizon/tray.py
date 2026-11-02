@@ -95,6 +95,50 @@ def refresh_icon(icon, color: str) -> None:
         icon.icon = make_icon_image(color)
 
 
+def custom_profile_items(app, log: Callable[[str], None] = print):
+    """Rebuild on menu opening; callbacks keep IDs even if the library changes."""
+    import pystray
+
+    from . import ipc
+    from .profiles import visual_settings
+
+    try:
+        profiles = app._profile_store().list()
+    except ValueError as exc:
+        log(f"[horizon] {exc}")
+        return (pystray.MenuItem("预设库无法读取，请打开控制面板", None, enabled=False),)
+    if not profiles:
+        return (pystray.MenuItem("暂无自定义预设", None, enabled=False),)
+
+    def make_item(profile):
+        def apply(_icon, _item):
+            try:
+                if not ipc.send_payload(app.hwnd, {"apply_profile": profile["id"]}):
+                    log("[horizon] preset unavailable; reopen the menu or control panel")
+            except (ValueError, OSError) as exc:
+                log(f"[horizon] cannot apply preset: {exc}")
+
+        binding = app.cfg.profile_hotkeys.get(profile["id"])
+        label = profile["name"] + (f"  ({binding})" if binding else "")
+        return pystray.MenuItem(
+            label, apply, checked=lambda _item: visual_settings(app.cfg) == profile["visuals"]
+        )
+
+    return tuple(make_item(profile) for profile in profiles)
+
+
+def make_tray_icon(pystray, *args, **kwargs):
+    # Windows pystray caches the native menu. Refresh on its own thread just
+    # before opening, so external panel edits and hotkeys are visible immediately.
+    class LiveMenuIcon(pystray.Icon):
+        def _on_notify(self, wparam, lparam):
+            if lparam == 0x0205:  # WM_RBUTTONUP
+                self.update_menu()
+            return super()._on_notify(wparam, lparam)
+
+    return LiveMenuIcon(*args, **kwargs)
+
+
 def start_tray(app, log: Callable[[str], None] = print):
     """Start the tray icon in a background thread. Returns the Icon or None."""
     try:
@@ -227,6 +271,7 @@ def start_tray(app, log: Callable[[str], None] = print):
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("颜色", color_menu),
         pystray.MenuItem("预设", preset_menu),
+        pystray.MenuItem("我的外观预设", pystray.Menu(lambda: custom_profile_items(app, log))),
         pystray.MenuItem("暗角强度", vignette_menu),
         pystray.MenuItem("显示元素", elements_menu),
         pystray.Menu.SEPARATOR,
@@ -237,7 +282,8 @@ def start_tray(app, log: Callable[[str], None] = print):
         pystray.MenuItem("退出", on_quit),
     )
 
-    icon = pystray.Icon(
+    icon = make_tray_icon(
+        pystray,
         "horizon",
         make_icon_image(app.cfg.color),
         f"Horizon · 3D 眩晕缓解叠加层 v{__version__}",

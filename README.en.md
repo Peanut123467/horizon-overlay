@@ -6,7 +6,11 @@ Horizon is a Windows utility for players who experience motion discomfort in 3D 
 
 **[Download Horizon.exe](https://github.com/Peanut123467/horizon-overlay/releases/latest)** · Windows 10 / 11 · No installer · Apache-2.0
 
-**v0.3.0:** redesigned control panel, screenshot comparison with a draggable centre handle, and a local visual preset library; removes nonessential captions and protects corrupted preset files. See the [release notes](docs/releases/v0.3.0.md)
+**v0.4.0:** custom preset hotkeys, direct tray selection, and individual JSON preset sharing — see the [release notes](docs/releases/v0.4.0.md)
+
+On a custom preset card, click 设置快捷键 (Set hotkey), then press a Ctrl combination; Esc cancels and 清除 (Clear) removes the binding — the tray's 我的外观预设 (My visual presets) submenu applies presets directly and checks matching appearances
+
+Use 导出 (Export) on a card and 导入预设 (Import preset) above the library to share one preset; duplicate names receive a suffix, and shared files contain only a name and appearance, with no hotkeys, screenshots or monitor settings
 
 ![Standard preset comparison](docs/compare-standard.png)
 

@@ -102,6 +102,42 @@ def main():
             print("PASS live hotkey rebind and conflict rollback", flush=True)
         else:
             raise AssertionError("integration test hotkey already occupied")
+        profile = api.save_profile("Runtime preset")[0]
+        api.bind_profile(profile["id"], "Ctrl+Alt+Shift+J")
+        api.patch({"color": "#112233"})
+        win32.user32.PostMessageW(ipc.find_overlay(), win32.WM_HOTKEY, 100, 0)
+        deadline = time.monotonic() + 5
+        while (
+            load(api._cfg_path).color != profile["visuals"]["color"] and time.monotonic() < deadline
+        ):
+            time.sleep(0.05)
+        assert load(api._cfg_path).color == profile["visuals"]["color"]
+        assert win32.register_hotkey(None, 0xBFFE, 7, ord("K"))
+        try:
+            try:
+                api.bind_profile(profile["id"], "Ctrl+Alt+Shift+K")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("occupied profile hotkey was accepted")
+            assert load(api._cfg_path).profile_hotkeys == {profile["id"]: "Ctrl+Alt+Shift+J"}
+        finally:
+            win32.user32.UnregisterHotKey(None, 0xBFFE)
+        api.patch({"color": "#112233"})
+        assert ipc.send_payload(ipc.find_overlay(), {"apply_profile": profile["id"]})
+        assert load(api._cfg_path).color == profile["visuals"]["color"]
+        api.reset()
+        assert not api.state()["config"]["profile_hotkeys"]
+        assert not load(api._cfg_path).profile_hotkeys
+        api.bind_profile(profile["id"], "Ctrl+Alt+Shift+J")
+        api.delete_profile(profile["id"])
+        assert not load(api._cfg_path).profile_hotkeys
+        assert win32.register_hotkey(None, 0xBFFE, 7, ord("J"))
+        win32.user32.UnregisterHotKey(None, 0xBFFE)
+        print(
+            "PASS real profile hotkey registration, dispatch, conflict rollback, tray IPC and cleanup",
+            flush=True,
+        )
         api.toggle_overlay()
         api.toggle_overlay()
         print("PASS overlay toggle commands", flush=True)

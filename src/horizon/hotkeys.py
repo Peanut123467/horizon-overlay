@@ -64,3 +64,21 @@ def validate_bindings(bindings: dict) -> dict[str, str]:
     if len(set(parsed)) != len(parsed):
         raise ValueError("快捷键重复，请为每个操作设置不同的组合")
     return result
+
+
+def validate_profile_bindings(bindings: dict, hotkeys: dict) -> dict[str, str]:
+    if not isinstance(bindings, dict) or len(bindings) > 50:
+        raise ValueError("预设快捷键配置无效，最多 50 项")
+    result = {}
+    parsed = {parse_binding(value) for value in validate_bindings(hotkeys).values()}
+    for identifier, binding in bindings.items():
+        if not isinstance(identifier, str) or not identifier or len(identifier) > 128:
+            raise ValueError("预设快捷键 ID 无效")
+        if binding == "":
+            continue
+        value = parse_binding(binding)
+        if value in parsed:
+            raise ValueError("快捷键重复，请为每个操作设置不同的组合")
+        parsed.add(value)
+        result[identifier] = binding
+    return result

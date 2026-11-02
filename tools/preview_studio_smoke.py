@@ -93,12 +93,16 @@ def probe(window, api, screenshot):
         window.evaluate_js("document.querySelector('.profile-apply').click()")
         wait(window, "cfg.frame.width===8")
         check("apply preserves timer", load(api._cfg_path).session.minutes == 37)
-        window.evaluate_js("document.querySelector('.profile-actions').children[2].click()")
+        window.evaluate_js(
+            "[...document.querySelector('.profile-actions').children].find(b=>b.textContent==='删除').click()"
+        )
         wait(window, "document.querySelector('#profile-dialog').open")
         check("delete asks confirmation", len(api.profiles()) == 2)
         window.evaluate_js("document.querySelector('#dialog-cancel').click()")
         check("cancel keeps preset", len(api.profiles()) == 2)
-        window.evaluate_js("document.querySelector('.profile-actions').children[2].click()")
+        window.evaluate_js(
+            "[...document.querySelector('.profile-actions').children].find(b=>b.textContent==='删除').click()"
+        )
         wait(window, "document.querySelector('#profile-dialog').open")
         window.evaluate_js("document.querySelector('#profile-form').requestSubmit()")
         wait(window, "document.querySelectorAll('.profile-card').length===1")

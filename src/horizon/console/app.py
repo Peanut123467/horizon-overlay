@@ -129,8 +129,48 @@ class Api:
 
     def delete_profile(self, identifier: str) -> list[dict]:
         with self._lock:
+            self._profile_store().get(identifier)
+            if identifier in self._load().profile_hotkeys:
+                self.patch({"profile_hotkeys": {identifier: ""}})
             self._profile_store().delete(identifier)
             return self.profiles()
+
+    def bind_profile(self, identifier: str, binding: str) -> dict[str, Any]:
+        with self._lock:
+            self._profile_store().get(identifier)
+            return self.patch({"profile_hotkeys": {identifier: binding}})
+
+    def import_profile(self) -> list[dict] | None:
+        import webview
+
+        paths = self._window.create_file_dialog(
+            webview.FileDialog.OPEN, file_types=("Horizon 外观预设 (*.json)",)
+        )
+        if not paths:
+            return None
+        with self._lock:
+            self._profile_store().import_file(Path(paths[0]))
+            return self.profiles()
+
+    def export_profile(self, identifier: str) -> str | None:
+        import webview
+
+        result = self._window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            save_filename="horizon-preset.json",
+            file_types=("Horizon 外观预设 (*.json)",),
+        )
+        if not result:
+            return None
+        path = Path(result if isinstance(result, str) else result[0])
+        if path.resolve() in {
+            self._cfg_path.resolve(),
+            self._cfg_path.with_suffix(".json.bak").resolve(),
+        }:
+            raise ValueError("请选择其他位置，不能覆盖当前配置")
+        with self._lock:
+            self._profile_store().export_file(identifier, path)
+        return str(path)
 
     # -- helpers -----------------------------------------------------------
 
@@ -185,8 +225,20 @@ class Api:
                 if not isinstance(changes["hotkeys"], dict):
                     raise ValueError("快捷键配置必须是对象")
                 validate_bindings({**current.hotkeys, **changes["hotkeys"]})
+            if isinstance(changes, dict) and ("hotkeys" in changes or "profile_hotkeys" in changes):
+                from ..hotkeys import validate_profile_bindings
+
+                incoming = changes.get("profile_hotkeys", {})
+                if not isinstance(incoming, dict):
+                    raise ValueError("预设快捷键配置必须是对象")
+                validate_profile_bindings(
+                    {**current.profile_hotkeys, **incoming},
+                    {**current.hotkeys, **changes.get("hotkeys", {})},
+                )
             cfg = apply_patch(current, changes or {})
-            if cfg.hotkeys != current.hotkeys and not ipc.find_overlay():
+            if (
+                cfg.hotkeys != current.hotkeys or cfg.profile_hotkeys != current.profile_hotkeys
+            ) and not ipc.find_overlay():
                 self._check_hotkeys(cfg)
             return self._commit(cfg, changes or {})
 
@@ -201,6 +253,11 @@ class Api:
             mods, vk = parse_binding(binding)
             if not win32.register_hotkey(None, 0xBFFE, mods, vk):
                 raise ValueError(f"{LABELS[action]}：{binding} 已被其他程序占用")
+            win32.user32.UnregisterHotKey(None, 0xBFFE)
+        for binding in cfg.profile_hotkeys.values():
+            mods, vk = parse_binding(binding)
+            if not win32.register_hotkey(None, 0xBFFE, mods, vk):
+                raise ValueError(f"预设快捷键：{binding} 已被其他程序占用")
             win32.user32.UnregisterHotKey(None, 0xBFFE)
 
     def hotkey_options(self) -> dict[str, Any]:
@@ -221,7 +278,9 @@ class Api:
             cfg = HorizonConfig()
             cfg.monitor = current.monitor
             cfg.tray_hint_shown = current.tray_hint_shown
-            return self._commit(cfg, cfg.to_dict())
+            changes = cfg.to_dict()
+            changes["profile_hotkeys"] = {identifier: "" for identifier in current.profile_hotkeys}
+            return self._commit(cfg, changes)
 
     def monitors(self) -> list[dict[str, Any]]:
         """Enumerate monitors so the page can offer a target picker."""

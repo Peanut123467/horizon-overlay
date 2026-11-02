@@ -807,6 +807,13 @@ function updateProfileSelection() {
       JSON.stringify(cfg[key]) === JSON.stringify(profile.visuals[key]));
     card.classList.toggle('active', !!matches);
     card.querySelector('.profile-apply').setAttribute('aria-pressed', String(!!matches));
+    const binding = cfg.profile_hotkeys?.[card.dataset.id] || '';
+    const record = card.querySelector('.profile-hotkey');
+    if (record && record.dataset.recording !== 'true' && !record.disabled) {
+      record.textContent = binding || '设置快捷键';
+    }
+    const clear = card.querySelector('.profile-hotkey-clear');
+    if (clear) clear.hidden = !binding;
   }
 }
 
@@ -852,11 +859,67 @@ function renderProfiles(items) {
       notify('已创建独立的预设副本');
     });
     makeAction('命名', async () => openProfileDialog('rename', profile));
+    makeAction('导出', async () => {
+      const path = await api.export_profile(profile.id);
+      if (path) notify('预设已导出');
+    });
     makeAction('删除', async () => openProfileDialog('delete', profile));
-    card.append(apply, actions);
+    card.append(apply, makeProfileBinding(profile), actions);
     list.appendChild(card);
   }
   updateProfileSelection();
+}
+
+function makeProfileBinding(profile) {
+  const row = document.createElement('div');
+  row.className = 'profile-binding';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn btn-ghost profile-hotkey';
+  button.setAttribute('aria-label', `设置快捷键：${profile.name}`);
+  button.title = '点击后按 Ctrl 组合键录制，Esc 取消';
+  const current = () => cfg.profile_hotkeys?.[profile.id] || '设置快捷键';
+  button.textContent = current();
+  button.addEventListener('click', () => {
+    button.textContent = '请按 Ctrl 组合键…';
+    button.dataset.recording = 'true';
+  });
+  button.addEventListener('blur', () => {
+    button.dataset.recording = 'false';
+    button.textContent = current();
+  });
+  button.addEventListener('keydown', async event => {
+    if (button.dataset.recording !== 'true') return;
+    event.preventDefault();
+    if (event.key === 'Escape') { button.blur(); return; }
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return;
+    if (event.metaKey) { showError(new Error('请使用 Ctrl 组合键')); return; }
+    const key = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3) : /^Digit[0-9]$/.test(event.code) ? event.code.slice(5) : event.key;
+    const value = [event.ctrlKey && 'Ctrl', event.altKey && 'Alt', event.shiftKey && 'Shift', key.toUpperCase()].filter(Boolean).join('+');
+    button.dataset.recording = 'false';
+    button.disabled = true;
+    try {
+      await flushPatch();
+      await enqueue(async () => renderState(await api.bind_profile(profile.id, value)));
+      notify('预设快捷键已保存');
+    } catch (err) { showError(err); }
+    finally {
+      button.disabled = false;
+      button.textContent = current();
+      updateProfileSelection();
+    }
+  });
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'btn btn-ghost profile-hotkey-clear';
+  clear.textContent = '清除';
+  clear.setAttribute('aria-label', `清除快捷键：${profile.name}`);
+  bindAction(clear, async () => {
+    renderState(await api.bind_profile(profile.id, ''));
+    notify('预设快捷键已清除');
+  });
+  row.append(button, clear);
+  return row;
 }
 
 function openProfileDialog(mode, profile = null) {
@@ -956,6 +1019,10 @@ async function bootStudio() {
   bindAction('#btn-preview-import', () => changePreviewSource(() => api.import_preview()));
   bindAction('#btn-preview-reset', () => changePreviewSource(() => api.reset_preview()));
   bindAction('#btn-profile-save', async () => openProfileDialog('save'));
+  bindAction('#btn-profile-import', async () => {
+    const items = await api.import_profile();
+    if (items) { renderProfiles(items); notify('预设已导入'); }
+  });
   $('#profile-form').addEventListener('submit', submitProfileDialog);
   $('#dialog-cancel').addEventListener('click', () => $('#profile-dialog').close());
   $('#profile-dialog').addEventListener('cancel', (event) => { if (profileDialogBusy) event.preventDefault(); });

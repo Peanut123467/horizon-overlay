@@ -13,6 +13,7 @@ from .config import HorizonConfig, apply_patch
 
 VISUAL_KEYS = ("vignette", "frame", "triangles", "reticle", "grid", "color")
 MAX_PROFILES = 50
+MAX_SHARE_BYTES = 256 * 1024
 
 
 def visual_settings(cfg: HorizonConfig) -> dict:
@@ -127,6 +128,60 @@ class ProfileStore:
 
     def get(self, identifier: str) -> dict:
         return self._find(self.list(), identifier)["visuals"]
+
+    def export_file(self, identifier: str, path: Path) -> None:
+        entry = self._find(self.list(), identifier)
+        if path.resolve() == self.path.resolve():
+            raise ValueError("请选择其他位置，不能覆盖预设库")
+        payload = {
+            "format": "horizon-visual-preset",
+            "version": 1,
+            "name": entry["name"],
+            "visuals": entry["visuals"],
+        }
+        temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            with temporary.open("x", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def import_file(self, path: Path) -> None:
+        try:
+            with path.open("rb") as stream:
+                data = stream.read(MAX_SHARE_BYTES + 1)
+            if len(data) > MAX_SHARE_BYTES:
+                raise ValueError
+            raw = json.loads(data.decode("utf-8-sig"))
+            if not isinstance(raw, dict) or set(raw) != {"format", "version", "name", "visuals"}:
+                raise ValueError
+            if (
+                raw["format"] != "horizon-visual-preset"
+                or type(raw["version"]) is not int
+                or raw["version"] != 1
+            ):
+                raise ValueError
+            name = checked_name(raw["name"])
+            if not isinstance(raw["visuals"], dict):
+                raise ValueError
+            visuals = checked_visuals(raw["visuals"])
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            raise ValueError("请选择有效的 Horizon 外观预设 JSON 文件（不超过 256 KB）") from exc
+        profiles = self.list()
+        if len(profiles) >= MAX_PROFILES:
+            raise ValueError("最多保存 50 个预设，请先删除不再使用的方案")
+        names = {p["name"].casefold() for p in profiles}
+        original = name
+        for number in range(1, MAX_PROFILES + 2):
+            if name.casefold() not in names:
+                break
+            suffix = f" · 导入 {number}"
+            name = original[: 40 - len(suffix)] + suffix
+        profiles.append({"id": uuid4().hex, "name": name, "visuals": visuals})
+        self._write(profiles)
 
     def rename(self, identifier: str, name: str) -> None:
         profiles = self.list()
